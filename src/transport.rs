@@ -107,22 +107,25 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.contains("not multicast"));
-        let configured = UdpOptions {
-            broadcast: true,
-            reuse_address: true,
-            ..UdpOptions::default()
-        };
-        let transport = Transport::external_udp_with_options(
-            &roles,
-            "client",
-            "server",
-            "127.0.0.1:9",
-            false,
-            &limits,
-            &configured,
-        )
-        .unwrap();
-        assert_eq!(transport.network_protocol(), NetworkProtocol::Udp);
+        #[cfg(unix)]
+        {
+            let configured = UdpOptions {
+                broadcast: true,
+                reuse_address: true,
+                ..UdpOptions::default()
+            };
+            let transport = Transport::external_udp_with_options(
+                &roles,
+                "client",
+                "server",
+                "127.0.0.1:9",
+                false,
+                &limits,
+                &configured,
+            )
+            .unwrap();
+            assert_eq!(transport.network_protocol(), NetworkProtocol::Udp);
+        }
     }
 }
 
