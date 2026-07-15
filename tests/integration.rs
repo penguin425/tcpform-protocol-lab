@@ -2546,7 +2546,11 @@ fn docker_raw_lab_scenario_runs_and_container_policy_is_hardened() {
     assert!(dockerfile.contains("--uid 10001"));
     assert!(dockerfile.contains("USER 0:0"));
     assert!(dockerfile.contains("cargo build --locked --release"));
-    assert!(dockerfile.contains("FROM nginx:1.27-alpine AS dashboard"));
+    assert!(dockerfile.contains(
+        "FROM nginx:1.31.2-alpine3.23-slim@sha256:dd722b8ee8794f3c273bfaf8b5351b0652a68ccd73c17e5f0d029857a58f25ef AS dashboard"
+    ));
+    let dependabot = std::fs::read_to_string(".github/dependabot.yml").unwrap();
+    assert!(dependabot.contains("package-ecosystem: docker"));
     let dashboard = std::fs::read_to_string("dashboard/index.html").unwrap();
     assert!(dashboard.contains("tcpform Visualizer"));
     assert!(dashboard.contains("manifest.json"));
