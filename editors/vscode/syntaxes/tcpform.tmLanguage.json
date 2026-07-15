@@ -1,11 +1,30 @@
 {
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "tcpform",
   "scopeName": "source.tcpform",
   "patterns": [
-    { "name": "comment.line.number-sign.tcpform", "match": "#.*$|//.*$" },
-    { "name": "keyword.control.tcpform", "match": "\\b(protocol|module|import|cases|case|step|transport|segment|expect|timer|assert|set|fault_when|header_schema)\\b" },
-    { "name": "constant.language.tcpform", "match": "\\b(true|false|null)\\b" },
-    { "name": "constant.numeric.tcpform", "match": "\\b[0-9]+(?:\\.[0-9]+)?\\b" },
-    { "name": "string.quoted.double.tcpform", "begin": "\"", "end": "\"", "patterns": [{"name":"constant.character.escape.tcpform","match":"\\\\."}] },
-    { "name": "variable.other.tcpform", "match": "\\$\\{[A-Za-z_][A-Za-z0-9_.-]*\\}" }
-  ]
+    { "include": "#comments" },
+    { "name": "keyword.declaration.tcpform", "match": "\\b(tcpform|protocol|module|import|cases|case|step|transport|segment|expect|timer|assert|set|fault_when|header_schema|headers|fields|vars|roles|states)\\b" },
+    { "name": "support.function.tcpform", "match": "\\b(send|recv|send_raw|recv_raw|ack|nack|wait|open|close|reset|drop|duplicate|corrupt|log|plugin)\\b" },
+    { "name": "keyword.operator.tcpform", "match": "==|!=|>=|<=|>|<|\\b(contains|matches|range|and|or|not)\\b" },
+    { "name": "constant.language.tcpform", "match": "\\b(true|false|null|pass|fail)\\b" },
+    { "name": "constant.numeric.tcpform", "match": "\\b(?:0x[0-9A-Fa-f]+|[0-9]+(?:\\.[0-9]+)?(?:ns|us|ms|s)?)\\b" },
+    { "include": "#strings" },
+    { "name": "variable.other.tcpform", "match": "\\$\\{[A-Za-z_][A-Za-z0-9_.-]*\\}" },
+    { "name": "entity.name.type.protocol.tcpform", "match": "(?<=\\bprotocol\\s\")[^\"]+(?=\")" },
+    { "name": "variable.other.member.tcpform", "match": "\\b[A-Za-z_][A-Za-z0-9_-]*(?=\\s*=)" }
+  ],
+  "repository": {
+    "comments": { "patterns": [
+      { "name": "comment.line.number-sign.tcpform", "match": "#.*$" },
+      { "name": "comment.line.double-slash.tcpform", "match": "//.*$" }
+    ] },
+    "strings": {
+      "name": "string.quoted.double.tcpform", "begin": "\"", "end": "\"",
+      "patterns": [
+        { "name": "constant.character.escape.tcpform", "match": "\\\\." },
+        { "name": "variable.other.tcpform", "match": "\\$\\{[A-Za-z_][A-Za-z0-9_.-]*\\}" }
+      ]
+    }
+  }
 }

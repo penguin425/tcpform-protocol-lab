@@ -36,8 +36,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      - run: npm ci
+        working-directory: editors/vscode
+      - run: npm test
+        working-directory: editors/vscode
+      - run: npm run package -- --out /tmp/tcpform-vscode.vsix
+        working-directory: editors/vscode
 
   case-report:
     runs-on: ubuntu-latest

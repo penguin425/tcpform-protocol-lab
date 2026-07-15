@@ -1,34 +1,64 @@
 {
   "name": "tcpform",
   "displayName": "tcpform DSL",
-  "description": "Language support powered by the tcpform LSP",
-  "version": "0.1.0",
+  "description": "Complete tcpform language, testing, and visualization support",
+  "version": "0.2.0",
+  "publisher": "penguin425",
+  "license": "MIT",
+  "repository": "https://github.com/penguin425/tcpform-protocol-lab",
   "engines": { "vscode": "^1.85.0" },
-  "categories": ["Programming Languages", "Formatters"],
-  "activationEvents": ["onLanguage:tcpform"],
+  "categories": ["Programming Languages", "Formatters", "Testing"],
+  "keywords": ["tcpform", "protocol", "network", "DSL"],
+  "activationEvents": ["onLanguage:tcpform", "onCommand:tcpform.openVisualizer"],
   "main": "./extension.js",
+  "scripts": {
+    "test": "node --check extension.js && node --test helpers.test.js",
+    "package": "vsce package"
+  },
   "contributes": {
     "languages": [{
-      "id": "tcpform",
-      "aliases": ["tcpform"],
-      "extensions": [".tcpf"],
+      "id": "tcpform", "aliases": ["tcpform", "TCPForm"], "extensions": [".tcpf"],
       "configuration": "./language-configuration.json"
     }],
     "grammars": [{
-      "language": "tcpform",
-      "scopeName": "source.tcpform",
-      "path": "./syntaxes/tcpform.tmLanguage.json"
+      "language": "tcpform", "scopeName": "source.tcpform", "path": "./syntaxes/tcpform.tmLanguage.json"
     }],
+    "commands": [
+      { "command": "tcpform.runProtocol", "title": "tcpform: Run Protocol", "icon": "$(play)" },
+      { "command": "tcpform.testProtocol", "title": "tcpform: Test Protocol", "icon": "$(beaker)" },
+      { "command": "tcpform.openVisualizer", "title": "tcpform: Open Visualizer", "icon": "$(preview)" },
+      { "command": "tcpform.refreshSchema", "title": "tcpform: Refresh DSL v2 Schema" },
+      { "command": "tcpform.showSchema", "title": "tcpform: Show DSL v2 Schema" }
+    ],
+    "menus": { "editor/title": [
+      { "command": "tcpform.runProtocol", "when": "editorLangId == tcpform", "group": "navigation" },
+      { "command": "tcpform.openVisualizer", "when": "editorLangId == tcpform", "group": "navigation" }
+    ] },
+    "taskDefinitions": [{
+      "type": "tcpform", "required": ["command", "protocol"],
+      "properties": {
+        "command": { "type": "string", "enum": ["run", "test"] },
+        "protocol": { "type": "string" }
+      }
+    }],
+    "problemMatchers": [{
+      "name": "tcpform", "owner": "tcpform", "fileLocation": ["autoDetect", "${workspaceFolder}"],
+      "pattern": [{
+        "regexp": "^(.*):(\\d+):(\\d+):\\s*(.*)$", "file": 1, "line": 2, "column": 3, "message": 4
+      }]
+    }],
+    "configurationDefaults": {
+      "[tcpform]": { "editor.defaultFormatter": "penguin425.tcpform", "editor.formatOnSave": true }
+    },
     "configuration": {
       "title": "tcpform",
       "properties": {
         "tcpform.executable": {
-          "type": "string",
-          "default": "tcpform",
-          "description": "Path to the tcpform executable"
+          "type": "string", "default": "tcpform", "description": "Path to the tcpform executable"
         }
       }
     }
   },
-  "dependencies": { "vscode-languageclient": "^9.0.1" }
+  "dependencies": { "vscode-languageclient": "^9.0.1" },
+  "devDependencies": { "@types/vscode": "^1.85.0", "@vscode/vsce": "^3.9.2" }
 }
