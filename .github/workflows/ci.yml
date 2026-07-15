@@ -37,7 +37,7 @@ jobs:
       - run: cargo run --locked -- test --jobs 4 --tag smoke --junit tcpform-junit.xml examples/dns_cases.tcpf dns_lookup
       - run: printf '%s\n' '{"success_rate":1,"p95_us":1000,"coverage":1,"retries":0}' > tcpform-metrics.json
       - run: cargo run --locked -- gate tcpform-metrics.json --min-success-rate 1 --max-p95-us 5000 --min-coverage 1 --max-retries 0
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: tcpform-junit
           path: tcpform-junit.xml
@@ -51,7 +51,7 @@ jobs:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@cargo-llvm-cov
       - run: cargo llvm-cov --all --locked --lcov --output-path lcov.info
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: lcov.info
@@ -83,7 +83,7 @@ jobs:
           curl --fail --silent http://127.0.0.1:8088/data/tcp-server.json | grep -q '"status":"ok"'
       - if: always()
         run: ./scripts/docker-visual-lab.sh down
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: docker-raw-pcaps
