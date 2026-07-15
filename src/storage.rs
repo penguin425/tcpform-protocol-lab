@@ -270,10 +270,8 @@ impl Store {
     }
 
     pub fn record_corpus(&self, protocol: &str, document: &Value) -> Result<String, String> {
-        let fingerprint = format!(
-            "{:x}",
-            sha2::Sha256::digest(document.to_string().as_bytes())
-        );
+        let fingerprint =
+            crate::bytes_to_hex(&sha2::Sha256::digest(document.to_string().as_bytes()));
         let id = new_id("corpus");
         let timestamp = now();
         self.connection()?.execute(

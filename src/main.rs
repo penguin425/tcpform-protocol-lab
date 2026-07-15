@@ -657,7 +657,7 @@ impl ServerState {
             .get("authorization")
             .and_then(|value| value.strip_prefix("Bearer "))
             .ok_or("authentication required")?;
-        let digest = format!("{:x}", Sha256::digest(token.as_bytes()));
+        let digest = tcpform::bytes_to_hex(&Sha256::digest(token.as_bytes()));
         self.auth
             .iter()
             .find(|entry| entry.token_sha256 == digest)
