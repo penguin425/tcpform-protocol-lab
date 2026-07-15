@@ -6,6 +6,11 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Update the dashboard to the digest-pinned nginx 1.31.2 Alpine 3.23 slim image
+  and enable weekly Dependabot updates for Docker base images.
+
 ## [0.3.0] - 2026-07-15
 
 ### Added
