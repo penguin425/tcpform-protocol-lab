@@ -36,6 +36,11 @@ fn main() {
         "serve" => cmd_serve(&args[2..]),
         "fmt" => cmd_fmt(&args[2..]),
         "migrate" => cmd_migrate(&args[2..]),
+        "init" => cmd_init(&args[2..]),
+        "template" => cmd_template(&args[2..]),
+        "schema" => cmd_schema(&args[2..]),
+        "ci-snapshot" => cmd_ci_snapshot(&args[2..]),
+        "ci-report" => cmd_ci_report(&args[2..]),
         "lsp" => cmd_lsp(),
         "gate" => cmd_gate(&args[2..]),
         "bundle" => cmd_bundle(&args[2..]),
@@ -75,6 +80,11 @@ fn usage() {
          tcpform serve [--bind 127.0.0.1:8080] [--db tcpform.sqlite] [--auth-config auth.json] [--workers 2] [--retention-days 30]\n  \
          tcpform fmt [--check|--write] [--stdin] [--config <file>] [--indent <n>] [--align] [--expand-inline] <file...>\n  \
          tcpform migrate [--check|--write] <file>\n  \
+         tcpform init [directory] [--name <name>] [--template <name>] [--force]\n  \
+         tcpform template <list|show <name>>\n  \
+         tcpform schema dsl [--output <file>]\n  \
+         tcpform ci-snapshot --output <file> <source> [protocol]\n  \
+         tcpform ci-report <baseline.json> <current.json> [--markdown <file>] [--json <file>] [--fail-on-regression]\n  \
          tcpform lsp\n  \
          tcpform gate <metrics.json> [--config <file>] [--profile <name>] [--baseline <file>] [--repeat <n>] [--markdown <file>] [--junit <file>] [--github]\n  \
          tcpform bundle --output <file> [--capture <file>] <source> <protocol>\n  \
@@ -379,13 +389,168 @@ fn find<'a>(protocols: &'a [Protocol], name: &str) -> Result<&'a Protocol, Strin
 
 fn cmd_validate(args: &[String]) -> Result<(), String> {
     let path = args.first().ok_or("usage: tcpform validate <file>")?;
-    let protocols = load(path)?;
+    let source = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let blocks = tcpform::parse_file(&source).map_err(|error| error.to_string())?;
+    let compatibility = tcpform::compat::inspect_dsl(&source, &blocks)?;
+    for warning in compatibility.warnings {
+        eprintln!("warning: {warning}");
+    }
+    let protocols = interpret(&blocks).map_err(|error| error.to_string())?;
     for p in &protocols {
         Engine::new(p.clone()).map_err(|e| e.to_string())?;
         println!("ok: protocol `{}` ({} steps)", p.name, p.steps.len());
     }
     if protocols.is_empty() {
         println!("ok: no protocols defined");
+    }
+    Ok(())
+}
+
+fn cmd_init(args: &[String]) -> Result<(), String> {
+    let mut directory = ".";
+    let mut name = None;
+    let mut template = "tcp-handshake";
+    let mut force = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--name" => {
+                index += 1;
+                name = Some(args.get(index).ok_or("--name requires a value")?.as_str());
+            }
+            "--template" => {
+                index += 1;
+                template = args.get(index).ok_or("--template requires a value")?;
+            }
+            "--force" => force = true,
+            value if !value.starts_with('-') && directory == "." => directory = value,
+            value => return Err(format!("unknown init argument `{value}`")),
+        }
+        index += 1;
+    }
+    let path = std::path::Path::new(directory);
+    let inferred = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("tcpform-project");
+    let written =
+        tcpform::templates::init_project(path, name.unwrap_or(inferred), template, force)?;
+    for path in written {
+        println!("created {}", path.display());
+    }
+    Ok(())
+}
+
+fn cmd_template(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
+        Some("list") => {
+            for template in tcpform::templates::list_templates() {
+                println!("{:<14} {}", template.name, template.description);
+            }
+            Ok(())
+        }
+        Some("show") => {
+            let name = args.get(1).ok_or("template show <name>")?;
+            print!("{}", tcpform::templates::render_template(name, name)?);
+            Ok(())
+        }
+        _ => Err("usage: tcpform template <list|show <name>>".into()),
+    }
+}
+
+fn cmd_schema(args: &[String]) -> Result<(), String> {
+    if args.first().map(String::as_str) != Some("dsl") {
+        return Err("usage: tcpform schema dsl [--output <file>]".into());
+    }
+    let rendered = serde_json::to_string_pretty(&tcpform::compat::dsl_json_schema())
+        .map_err(|error| error.to_string())?;
+    if let Some(position) = args.iter().position(|arg| arg == "--output") {
+        let path = args.get(position + 1).ok_or("--output requires a file")?;
+        fs::write(path, format!("{rendered}\n")).map_err(|error| error.to_string())?;
+    } else {
+        println!("{rendered}");
+    }
+    Ok(())
+}
+
+fn cmd_ci_snapshot(args: &[String]) -> Result<(), String> {
+    let output_position = args
+        .iter()
+        .position(|arg| arg == "--output")
+        .ok_or("ci-snapshot requires --output <file>")?;
+    let output = args
+        .get(output_position + 1)
+        .ok_or("--output requires a file")?;
+    let positional = args
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != output_position && *index != output_position + 1)
+        .map(|(_, value)| value)
+        .collect::<Vec<_>>();
+    let source = positional
+        .first()
+        .ok_or("ci-snapshot requires a source file")?;
+    let (protocols, suites) = load_with_cases(source)?;
+    let snapshot = tcpform::ci_report::create_snapshot(
+        &protocols,
+        &suites,
+        positional.get(1).map(|value| value.as_str()),
+    )?;
+    fs::write(
+        output,
+        format!("{}\n", serde_json::to_string_pretty(&snapshot).unwrap()),
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn cmd_ci_report(args: &[String]) -> Result<(), String> {
+    let mut positional = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--markdown" | "--json" => index += 2,
+            "--fail-on-regression" => index += 1,
+            value if value.starts_with('-') => {
+                return Err(format!("unknown ci-report argument `{value}`"));
+            }
+            _ => {
+                positional.push(&args[index]);
+                index += 1;
+            }
+        }
+    }
+    let baseline_path = positional
+        .first()
+        .ok_or("ci-report requires baseline and current snapshots")?;
+    let current_path = positional
+        .get(1)
+        .ok_or("ci-report requires baseline and current snapshots")?;
+    let read = |path: &str| -> Result<serde_json::Value, String> {
+        serde_json::from_str(&fs::read_to_string(path).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())
+    };
+    let report = tcpform::ci_report::compare_snapshots(&read(baseline_path)?, &read(current_path)?);
+    let markdown = tcpform::ci_report::markdown_report(&report);
+    if let Some(position) = args.iter().position(|arg| arg == "--markdown") {
+        fs::write(
+            args.get(position + 1).ok_or("--markdown requires a file")?,
+            &markdown,
+        )
+        .map_err(|error| error.to_string())?;
+    } else {
+        print!("{markdown}");
+    }
+    if let Some(position) = args.iter().position(|arg| arg == "--json") {
+        fs::write(
+            args.get(position + 1).ok_or("--json requires a file")?,
+            format!("{}\n", serde_json::to_string_pretty(&report).unwrap()),
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    if args.iter().any(|arg| arg == "--fail-on-regression")
+        && report["regression"].as_bool() == Some(true)
+    {
+        return Err("tcpform regression detected".into());
     }
     Ok(())
 }

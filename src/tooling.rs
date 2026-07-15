@@ -322,7 +322,7 @@ fn brace_counts(line: &str) -> (usize, usize) {
     (opens, closes)
 }
 
-pub const DSL_VERSION: u32 = 2;
+pub const DSL_VERSION: u32 = crate::compat::DSL_VERSION;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MigrationResult {
@@ -337,10 +337,19 @@ pub struct MigrationResult {
 pub fn migrate_dsl(source: &str) -> Result<MigrationResult, String> {
     let marker = regex_lite::Regex::new(r"(?m)^\s*#\s*tcpform-version:\s*(\d+)\s*$")
         .map_err(|error| error.to_string())?;
-    let from_version = marker
+    let metadata =
+        regex_lite::Regex::new(r"(?s)\btcpform\s*\{[^}]*\bdsl_version\s*=\s*(\d+)[^}]*\}")
+            .map_err(|error| error.to_string())?;
+    let from_version = metadata
         .captures(source)
         .and_then(|capture| capture.get(1))
         .and_then(|value| value.as_str().parse::<u32>().ok())
+        .or_else(|| {
+            marker
+                .captures(source)
+                .and_then(|capture| capture.get(1))
+                .and_then(|value| value.as_str().parse::<u32>().ok())
+        })
         .unwrap_or(1);
     if from_version > DSL_VERSION {
         return Err(format!(
@@ -393,14 +402,19 @@ pub fn migrate_dsl(source: &str) -> Result<MigrationResult, String> {
             changes.push(description.to_string());
         }
     }
-    let current_marker = format!("# tcpform-version: {DSL_VERSION}");
-    if marker.is_match(&migrated) {
-        migrated = marker
-            .replace(&migrated, current_marker.as_str())
+    if metadata.is_match(&migrated) {
+        let version_attribute = regex_lite::Regex::new(r"\bdsl_version\s*=\s*\d+")
+            .map_err(|error| error.to_string())?;
+        migrated = version_attribute
+            .replace(&migrated, format!("dsl_version = {DSL_VERSION}").as_str())
             .into_owned();
     } else {
-        migrated = format!("{current_marker}\n{migrated}");
-        changes.push("added DSL version marker".to_string());
+        migrated = marker.replace(&migrated, "").into_owned();
+        migrated = format!(
+            "tcpform {{ dsl_version = {DSL_VERSION} }}\n\n{}",
+            migrated.trim_start()
+        );
+        changes.push("added tcpform DSL metadata".to_string());
     }
     Ok(MigrationResult {
         source: migrated,
@@ -1026,7 +1040,7 @@ mod tests {
 }"#;
         let migrated = migrate_dsl(legacy).unwrap();
         assert_eq!(migrated.from_version, 1);
-        assert!(migrated.source.starts_with("# tcpform-version: 2\n"));
+        assert!(migrated.source.starts_with("tcpform { dsl_version = 2 }\n"));
         assert!(migrated.source.contains("delay = \"10ms\""));
         assert!(migrated
             .source

@@ -37,6 +37,8 @@
 //! ```
 
 pub mod ast;
+pub mod ci_report;
+pub mod compat;
 pub mod engine;
 pub mod graph;
 pub mod loader;
@@ -49,6 +51,7 @@ pub mod plugin;
 pub mod primitives;
 pub mod raw_socket;
 pub mod storage;
+pub mod templates;
 pub mod tls_audit;
 pub mod tooling;
 pub mod transport;

@@ -30,10 +30,45 @@ and creates or updates the GitHub Release. To additionally publish to crates.io,
 set the repository variable `PUBLISH_CRATE` to `true` and add the
 `CARGO_REGISTRY_TOKEN` Actions secret.
 
+## Start a protocol project
+
+Create a ready-to-run project from a built-in template. Available templates are
+`tcp-handshake`, `dns`, `http`, `websocket`, and `tls`.
+
+```sh
+tcpform template list
+tcpform init my-protocol --template websocket
+cd my-protocol
+tcpform validate protocol.tcpf
+tcpform test protocol.tcpf
+```
+
+The generated project includes a versioned DSL file, smoke case, formatter
+configuration, README, and GitHub Actions workflow. On pull requests, CI posts
+or updates one differential report covering success rate, P95 latency, packet
+and header changes, state-machine changes, and newly failing cases.
+
+DSL documents should declare `tcpform { dsl_version = 2 }`. Older documents
+continue to load with deprecation warnings and can be upgraded in place:
+
+```sh
+tcpform migrate --check protocol.tcpf
+tcpform migrate --write protocol.tcpf
+tcpform schema dsl --output tcpform-dsl.schema.json
+```
+
+For custom CI, create snapshots for the base and current revisions and compare
+them with `tcpform ci-report base.json current.json --markdown report.md`.
+
 ## CLI
 
 ```text
 tcpform validate <file>                # parse + validate every protocol
+tcpform init demo --template websocket # scaffold a protocol project and CI
+tcpform template list                  # list built-in protocol templates
+tcpform schema dsl                     # print the machine-readable DSL schema
+tcpform ci-snapshot --output result.json <file> [protocol]
+tcpform ci-report base.json result.json --markdown report.md
 tcpform list <file>                    # list protocols, steps, roles
 tcpform plan   <file> <protocol>       # show the resolved topological order
 tcpform run    <file> <protocol>       # simulate and print the event timeline

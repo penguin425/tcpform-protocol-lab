@@ -8,6 +8,12 @@ All notable changes to tcpform are documented here. The format follows
 
 ### Added
 
+- Project scaffolding with `tcpform init`, five built-in protocol templates,
+  formatter configuration, smoke cases, and GitHub Actions CI.
+- Pull-request differential reports for success rate, P95 latency, packets,
+  headers, state-machine changes, and newly failing cases.
+- Explicit DSL version metadata, deprecation diagnostics, automatic migration,
+  and a machine-readable JSON Schema.
 - Automated signed-tag releases with native archives and SHA256 checksums.
 - Contribution, security, conduct, issue, and pull request guidance for the OSS
   community.
@@ -37,4 +43,3 @@ All notable changes to tcpform are documented here. The format follows
 [Unreleased]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/penguin425/tcpform-protocol-lab/releases/tag/v0.1.0
-
