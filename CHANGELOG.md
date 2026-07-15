@@ -6,6 +6,8 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-15
+
 ### Changed
 
 - Updated the Docker publishing actions to their Node.js 24-based major
@@ -103,7 +105,8 @@ All notable changes to tcpform are documented here. The format follows
   live transports, raw packet workflows, browser visualizer, test cases, fault
   injection, PCAP output, LSP, formatter, bundles, plugins, and CI tooling.
 
-[Unreleased]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.3.1...v0.4.0
