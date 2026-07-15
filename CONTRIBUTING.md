@@ -14,7 +14,7 @@ examples, documentation, bug reports, and design feedback are welcome.
 
 ## Development setup
 
-tcpform requires Rust 1.88 or newer. Node.js 20 and Docker are only needed for
+tcpform requires Rust 1.97 or newer. Node.js 20 and Docker are only needed for
 the browser and container test suites.
 
 ```sh
@@ -72,4 +72,3 @@ bundle. A small reproducible case is more valuable than a large production
 capture.
 
 By participating, you agree to follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
-
