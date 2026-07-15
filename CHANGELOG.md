@@ -6,6 +6,17 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Added signed multi-platform CLI and dashboard container publishing to GHCR,
+  with optional Docker Hub mirroring, SBOMs, provenance, and a published-image
+  Compose lab.
+
+### Changed
+
+- Run the published CLI image as UID/GID 10001 by default and require raw labs
+  to opt into root startup and narrowly scoped capabilities explicitly.
+
 ## [0.4.1] - 2026-07-15
 
 ### Changed

@@ -15,7 +15,7 @@ COPY examples/docker /scenarios
 # Compose starts with the three capabilities needed to open AF_PACKET and
 # irreversibly switch to UID/GID 10001. tcpform performs that switch before
 # starting any transport worker or executing a DSL step.
-USER 0:0
+USER tcpform:tcpform
 ENTRYPOINT ["/usr/local/bin/tcpform"]
 
 FROM nginx:1.31.2-alpine3.23-slim@sha256:dd722b8ee8794f3c273bfaf8b5351b0652a68ccd73c17e5f0d029857a58f25ef AS dashboard
