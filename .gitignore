@@ -1,0 +1,29 @@
+/target/
+/fuzz/target/
+/node_modules/
+/test-results/
+/playwright-report/
+*.profraw
+*.profdata
+
+# Local service state and credentials
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+.env.*
+!.env.example
+auth.json
+auth-config.json
+
+# Captures and locally generated key material
+*.pcap
+*.pcapng
+*.key
+*.pem
+
+# Editor and operating-system state
+.DS_Store
+.idea/
+.vscode/
+*.swp

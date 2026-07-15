@@ -1,0 +1,103 @@
+# SIP call setup: INVITE, provisional responses (100 Trying, 180 Ringing),
+# 200 OK, ACK to confirm, then a media session, then BYE both ways to tear
+# down. Demonstrates a VoIP signaling transaction.
+protocol "sip_call" {
+  description = "SIP INVITE session: invite, ringing, ok, ack, bye"
+
+  step "invite" {
+    role    = "caller"
+    action  = "send"
+    segment { flags = ["SIP"] payload = "INVITE sip:bob@x SIP/2.0" }
+  }
+  step "rinvite" {
+    role   = "callee"
+    action = "recv"
+    expect { flags = ["SIP"] }
+  }
+  step "trying" {
+    role       = "callee"
+    action     = "send"
+    depends_on = ["rinvite"]
+    segment    { flags = ["SIP"] payload = "SIP/2.0 100 Trying" }
+  }
+  step "ringing" {
+    role       = "callee"
+    action     = "send"
+    depends_on = ["trying"]
+    segment    { flags = ["SIP"] payload = "SIP/2.0 180 Ringing" }
+  }
+  step "ok" {
+    role       = "callee"
+    action     = "send"
+    depends_on = ["ringing"]
+    segment    { flags = ["SIP"] payload = "SIP/2.0 200 OK" }
+  }
+  step "rtrying" {
+    role       = "caller"
+    action     = "recv"
+    depends_on = ["invite"]
+    expect     { flags = ["SIP"] }
+  }
+  step "rringing" {
+    role       = "caller"
+    action     = "recv"
+    depends_on = ["rtrying"]
+    expect     { flags = ["SIP"] }
+  }
+  step "rok" {
+    role       = "caller"
+    action     = "recv"
+    depends_on = ["rringing"]
+    expect     { flags = ["SIP"] payload = "SIP/2.0 200 OK" }
+  }
+  step "ack" {
+    role       = "caller"
+    action     = "send"
+    depends_on = ["rok"]
+    segment    { flags = ["SIP"] payload = "ACK sip:bob@x SIP/2.0" }
+  }
+  step "rack" {
+    role       = "callee"
+    action     = "recv"
+    depends_on = ["ok"]
+    expect     { flags = ["SIP"] payload = "ACK sip:bob@x SIP/2.0" }
+  }
+  # media session marker (no actual media in this model)
+  step "media" {
+    role       = "caller"
+    action     = "log"
+    depends_on = ["ack"]
+    message    = "media session active (RTP)"
+  }
+  # teardown
+  step "bye" {
+    role       = "caller"
+    action     = "send"
+    depends_on = ["media"]
+    segment    { flags = ["SIP"] payload = "BYE sip:bob@x SIP/2.0" }
+  }
+  step "rbye" {
+    role       = "callee"
+    action     = "recv"
+    depends_on = ["rack"]
+    expect     { flags = ["SIP"] }
+  }
+  step "bye_ok" {
+    role       = "callee"
+    action     = "send"
+    depends_on = ["rbye"]
+    segment    { flags = ["SIP"] payload = "SIP/2.0 200 OK" }
+  }
+  step "rbye_ok" {
+    role       = "caller"
+    action     = "recv"
+    depends_on = ["bye"]
+    expect     { flags = ["SIP"] }
+  }
+  step "verify" {
+    role       = "callee"
+    action     = "assert"
+    depends_on = ["bye_ok"]
+    assert     { send_count = 4 recv_count = 3 }
+  }
+}

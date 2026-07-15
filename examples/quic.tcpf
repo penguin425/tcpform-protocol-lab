@@ -1,0 +1,97 @@
+# QUIC handshake + multiplexed 1-RTT streams. The handshake uses INITIAL and
+# HANDSHAKE packets for crypto; afterwards, application data runs on multiple
+# streams (0 and 4) interleaved over the single connection.
+protocol "quic" {
+  description = "QUIC handshake + interleaved 1-RTT streams"
+
+  step "initial" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["INITIAL"] payload = "Crypto: ClientHello" }
+  }
+  step "rinitial" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["INITIAL"] }
+  }
+  step "handshake_flight" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rinitial"]
+    segment    { flags = ["HANDSHAKE"] payload = "Crypto: ServerHello+Finished" }
+  }
+  step "rhandshake_flight" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["initial"]
+    expect     { flags = ["HANDSHAKE"] }
+  }
+  step "client_finished" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rhandshake_flight"]
+    segment    { flags = ["HANDSHAKE"] payload = "Crypto: Finished" }
+  }
+  step "rclient_finished" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["handshake_flight"]
+    expect     { flags = ["HANDSHAKE"] }
+  }
+  # 1-RTT stream 0 (bidirectional)
+  step "s0_req" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["client_finished"]
+    segment    { flags = ["1-RTT"] stream = 0 payload = "GET /index" }
+  }
+  step "rs0_req" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["rclient_finished"]
+    expect     { flags = ["1-RTT"] stream = 0 }
+  }
+  step "s0_resp" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rs0_req"]
+    segment    { flags = ["1-RTT"] stream = 0 payload = "200 OK" }
+  }
+  # 1-RTT stream 4 (interleaved)
+  step "s4_req" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["s0_req"]
+    segment    { flags = ["1-RTT"] stream = 4 payload = "GET /style" }
+  }
+  step "rs4_req" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["rs0_req"]
+    expect     { flags = ["1-RTT"] stream = 4 }
+  }
+  step "s4_resp" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rs4_req"]
+    segment    { flags = ["1-RTT"] stream = 4 payload = "200 OK" }
+  }
+  step "rs0_resp" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["s0_req"]
+    expect     { flags = ["1-RTT"] stream = 0 }
+  }
+  step "rs4_resp" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["s4_req"]
+    expect     { flags = ["1-RTT"] stream = 4 }
+  }
+  step "verify" {
+    role       = "client"
+    action     = "assert"
+    depends_on = ["rs4_resp"]
+    assert     { send_count = 4 recv_count = 3 }
+  }
+}

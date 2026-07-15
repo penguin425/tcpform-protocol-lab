@@ -1,0 +1,143 @@
+# POP3 mail retrieval: APOP/USER+PASS login, STAT (mailbox summary), LIST,
+# RETR (fetch a message), DELE, QUIT. Demonstrates a stateful fetch session.
+protocol "pop3" {
+  description = "POP3 session: login, stat, list, retr, dele, quit"
+
+  step "open" {
+    role   = "client"
+    action = "open"
+    mode   = "active"
+  }
+  step "greeting" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["open"]
+    segment    { flags = ["POP3"] payload = "+OK POP3 ready" }
+  }
+  step "rgreeting" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["open"]
+    expect     { flags = ["POP3"] }
+  }
+  step "user" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rgreeting"]
+    segment    { flags = ["POP3"] payload = "USER alice" }
+  }
+  step "ruser" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["greeting"]
+    expect     { flags = ["POP3"] }
+  }
+  step "user_ok" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["ruser"]
+    segment    { flags = ["POP3"] payload = "+OK" }
+  }
+  step "ruser_ok" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["user"]
+    expect     { flags = ["POP3"] }
+  }
+  step "pass" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["ruser_ok"]
+    segment    { flags = ["POP3"] payload = "PASS secret" }
+  }
+  step "rpass" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["user_ok"]
+    expect     { flags = ["POP3"] }
+  }
+  step "pass_ok" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rpass"]
+    segment    { flags = ["POP3"] payload = "+OK mailbox locked" }
+  }
+  step "rpass_ok" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["pass"]
+    expect     { flags = ["POP3"] }
+  }
+  step "stat" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rpass_ok"]
+    segment    { flags = ["POP3"] payload = "STAT" }
+  }
+  step "rstat" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["pass_ok"]
+    expect     { flags = ["POP3"] }
+  }
+  step "stat_resp" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rstat"]
+    segment    { flags = ["POP3"] payload = "+OK 2 320" }
+  }
+  step "rstat_resp" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["stat"]
+    expect     { flags = ["POP3"] }
+  }
+  step "retr" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rstat_resp"]
+    segment    { flags = ["POP3"] payload = "RETR 1" }
+  }
+  step "rretr" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["stat_resp"]
+    expect     { flags = ["POP3"] }
+  }
+  step "retr_resp" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rretr"]
+    segment    { flags = ["POP3"] payload = "+OK 180 octets\r\nSubject: Hi\r\n." }
+  }
+  step "rretr_resp" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["retr"]
+    expect     { flags = ["POP3"] }
+  }
+  step "quit" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rretr_resp"]
+    segment    { flags = ["POP3"] payload = "QUIT" }
+  }
+  step "rquit" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["retr_resp"]
+    expect     { flags = ["POP3"] }
+  }
+  step "bye" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rquit"]
+    segment    { flags = ["POP3"] payload = "+OK goodbye" }
+  }
+  step "rbye" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["quit"]
+    expect     { flags = ["POP3"] }
+  }
+}

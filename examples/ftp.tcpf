@@ -1,0 +1,158 @@
+# FTP: control connection (USER/PASS, PASV, RETR, QUIT) plus a separate data
+# connection for the file transfer. Demonstrates two logical connections.
+protocol "ftp" {
+  description = "FTP control + passive data transfer"
+
+  # --- control connection ---
+  step "open" {
+    role   = "client"
+    action = "open"
+    mode   = "active"
+  }
+  step "greeting" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["open"]
+    segment    { flags = ["FTP-CTL"] payload = "220 ftp.example.com" }
+  }
+  step "rgreeting" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["open"]
+    expect     { flags = ["FTP-CTL"] }
+  }
+  step "user" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rgreeting"]
+    segment    { flags = ["FTP-CTL"] payload = "USER anonymous" }
+  }
+  step "ruser" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["greeting"]
+    expect     { flags = ["FTP-CTL"] }
+  }
+  step "user_ok" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["ruser"]
+    segment    { flags = ["FTP-CTL"] payload = "331 Please specify password" }
+  }
+  step "ruser_ok" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["user"]
+    expect     { flags = ["FTP-CTL"] }
+  }
+  step "pass" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["ruser_ok"]
+    segment    { flags = ["FTP-CTL"] payload = "PASS a@b.com" }
+  }
+  step "rpass" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["user_ok"]
+    expect     { flags = ["FTP-CTL"] }
+  }
+  step "pass_ok" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rpass"]
+    segment    { flags = ["FTP-CTL"] payload = "230 Login successful" }
+  }
+  step "rpass_ok" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["pass"]
+    expect     { flags = ["FTP-CTL"] }
+  }
+  step "pasv" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rpass_ok"]
+    segment    { flags = ["FTP-CTL"] payload = "PASV" }
+  }
+  step "rpasv" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["pass_ok"]
+    expect     { flags = ["FTP-CTL"] }
+  }
+  step "pasv_ok" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rpasv"]
+    segment    { flags = ["FTP-CTL"] payload = "227 Entering Passive Mode (198,51,100,1,195,80)" }
+  }
+  step "rpasv_ok" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["pasv"]
+    expect     { flags = ["FTP-CTL"] }
+  }
+  step "retr" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rpasv_ok"]
+    segment    { flags = ["FTP-CTL"] payload = "RETR file.txt" }
+  }
+  step "rretr" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["pasv_ok"]
+    expect     { flags = ["FTP-CTL"] }
+  }
+  # --- data connection: server pushes file contents ---
+  step "data" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rretr"]
+    to         = "client"
+    segment    { flags = ["FTP-DATA"] payload = "contents of file.txt" }
+  }
+  step "rdata" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["retr"]
+    expect     { flags = ["FTP-DATA"] }
+  }
+  step "retr_ok" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["data"]
+    segment    { flags = ["FTP-CTL"] payload = "226 Transfer complete" }
+  }
+  step "rretr_ok" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["rdata"]
+    expect     { flags = ["FTP-CTL"] }
+  }
+  step "quit" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rretr_ok"]
+    segment    { flags = ["FTP-CTL"] payload = "QUIT" }
+  }
+  step "rquit" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["retr_ok"]
+    expect     { flags = ["FTP-CTL"] }
+  }
+  step "bye" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rquit"]
+    segment    { flags = ["FTP-CTL"] payload = "221 Goodbye" }
+  }
+  step "rbye" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["quit"]
+    expect     { flags = ["FTP-CTL"] }
+  }
+}

@@ -1,0 +1,108 @@
+# Go-Back-N ARQ with a lost frame: the sender transmits frames 0,1,2 (window
+# N=3); frame 1 is DROPPED in the network. The receiver only ACKs frame 0
+# (cumulative ack stays at 1), so on timeout the sender retransmits frames
+# 1 and 2 (go back to the first unacknowledged frame).
+protocol "go_back_n" {
+  description = "Go-Back-N: windowed send with loss + retransmission"
+
+  step "f0" {
+    role    = "sender"
+    action  = "send"
+    segment { flags = ["DATA"] seq = 0 payload = "w0" }
+  }
+  step "f1" {
+    role       = "sender"
+    action     = "send"
+    depends_on = ["f0"]
+    segment    { flags = ["DATA"] seq = 1 payload = "w1" }
+  }
+  step "f2" {
+    role       = "sender"
+    action     = "send"
+    depends_on = ["f1"]
+    segment    { flags = ["DATA"] seq = 2 payload = "w2" }
+  }
+  # receiver gets frame 0 only (1 is lost below, 2 arrives out of order)
+  step "r0" {
+    role   = "receiver"
+    action = "recv"
+    expect { flags = ["DATA"] }
+  }
+  # frame 1 is lost in the network (receiver-side drop models loss)
+  step "drop1" {
+    role       = "receiver"
+    action     = "drop"
+    depends_on = ["r0"]
+    expect     { flags = ["DATA"] }
+    timer      { timeout = "300ms" }
+  }
+  # receiver discards out-of-order frame 2 (drop, expecting seq=1)
+  step "drop2" {
+    role       = "receiver"
+    action     = "drop"
+    depends_on = ["drop1"]
+    expect     { flags = ["DATA"] }
+    timer      { timeout = "300ms" }
+  }
+  step "ack0" {
+    role       = "receiver"
+    action     = "ack"
+    depends_on = ["r0"]
+    segment    { flags = ["ACK"] ack = 1 }
+  }
+  step "rack0" {
+    role       = "sender"
+    action     = "recv"
+    depends_on = ["f2"]
+    expect     { flags = ["ACK"] }
+  }
+  # sender timeout: go back and retransmit from frame 1
+  step "timeout" {
+    role       = "sender"
+    action     = "wait"
+    depends_on = ["rack0"]
+    timer      { timeout = "100ms" }
+  }
+  step "f1r" {
+    role       = "sender"
+    action     = "send"
+    depends_on = ["timeout"]
+    segment    { flags = ["DATA"] seq = 1 payload = "w1" }
+  }
+  step "f2r" {
+    role       = "sender"
+    action     = "send"
+    depends_on = ["f1r"]
+    segment    { flags = ["DATA"] seq = 2 payload = "w2" }
+  }
+  step "r1r" {
+    role       = "receiver"
+    action     = "recv"
+    depends_on = ["drop2"]
+    expect     { flags = ["DATA"] }
+  }
+  step "r2r" {
+    role       = "receiver"
+    action     = "recv"
+    depends_on = ["r1r"]
+    expect     { flags = ["DATA"] }
+  }
+  step "ack2" {
+    role       = "receiver"
+    action     = "ack"
+    depends_on = ["r2r"]
+    segment    { flags = ["ACK"] ack = 3 }
+  }
+  step "rack2" {
+    role       = "sender"
+    action     = "recv"
+    depends_on = ["f2r"]
+    expect     { flags = ["ACK"] }
+  }
+  step "verify" {
+    role       = "sender"
+    action     = "assert"
+    depends_on = ["rack2"]
+    assert     { send_count = 5 }
+  }
+}

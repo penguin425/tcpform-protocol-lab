@@ -1,0 +1,135 @@
+# Demonstrates the full set of protocol primitives beyond send/recv/ack:
+# open, drop (loss injection), duplicate, nack, reset, window, stream,
+# set, assert, log.
+#
+# Scenario: a lossy request/response where the server drops the first request,
+# the client retransmits; the server NACKs a corrupt/short request once; then
+# a clean exchange with a flow-control window and a multiplexed stream. The
+# client asserts it sent 3 segments and received 2, and logs a checkpoint.
+
+protocol "rich_primitives" {
+  description = "drop, duplicate, nack, reset, window, stream, set, assert, log"
+
+  step "c_open" {
+    role   = "client"
+    action = "open"
+    mode   = "active"
+  }
+
+  step "s_open" {
+    role   = "server"
+    action = "listen"
+  }
+
+  # client sends request #1
+  step "req1" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["c_open"]
+    to         = "server"
+    segment    { flags = ["REQ"] payload = "hello" }
+  }
+
+  # server DROPS the first request (simulates loss); never fails the run
+  step "drop_req1" {
+    role       = "server"
+    action     = "drop"
+    depends_on = ["s_open"]
+    expect     { flags = ["REQ"] from = "client" }
+    timer      { timeout = "300ms" }
+  }
+
+  # server NACKs a request it considered too short (a separate, corrupt REQ)
+  step "req_bad" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["req1"]
+    to         = "server"
+    segment    { flags = ["REQ"] payload = "x" }
+  }
+
+  step "nack_bad" {
+    role       = "server"
+    action     = "nack"
+    depends_on = ["drop_req1"]
+    expect     { flags = ["REQ"] from = "client" }
+    segment    { flags = ["NACK"] ack = 1001 }
+  }
+
+  # client retransmits the good request
+  step "req2" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["req_bad"]
+    to         = "server"
+    segment    { flags = ["REQ"] payload = "hello" }
+  }
+
+  # server DUPLICATES its response (tests receiver idempotency)
+  step "resp" {
+    role       = "server"
+    action     = "duplicate"
+    depends_on = ["nack_bad"]
+    to         = "client"
+    segment    { flags = ["RESP"] payload = "world" window = 65535 stream = 1 }
+  }
+
+  step "recv_resp1" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["req2"]
+    expect     { flags = ["RESP"] from = "server" window = 65535 stream = 1 }
+  }
+
+  step "recv_resp2" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["recv_resp1"]
+    expect     { flags = ["RESP"] from = "server" window = 65535 stream = 1 }
+  }
+
+  # client records a local variable, then asserts counters and received flags
+  step "mark_phase" {
+    role       = "client"
+    action     = "set"
+    depends_on = ["recv_resp2"]
+    set        { phase = "done" }
+  }
+
+  step "verify" {
+    role       = "client"
+    action     = "assert"
+    depends_on = ["mark_phase"]
+    assert     { send_count = 3 recv_count = 2 recv_flags = ["RESP"] phase = "done" }
+  }
+
+  step "checkpoint" {
+    role       = "client"
+    action     = "log"
+    depends_on = ["verify"]
+    message    = "exchange complete"
+  }
+
+  # server RESETs the connection (abortive close) and asserts it aborted
+  step "abort" {
+    role       = "server"
+    action     = "reset"
+    depends_on = ["resp"]
+    to         = "client"
+  }
+
+  step "recv_rst" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["checkpoint"]
+    expect     { flags = ["RST"] from = "server" }
+  }
+
+  step "verify_rst" {
+    role       = "server"
+    action     = "assert"
+    depends_on = ["abort"]
+    # send_count counts wire segments: nack(1) + duplicate(2) + reset(1) = 4
+    assert     { aborted = true send_count = 4 }
+  }
+}

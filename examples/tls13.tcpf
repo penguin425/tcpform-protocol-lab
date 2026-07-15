@@ -1,0 +1,73 @@
+# TLS 1.3 1-RTT handshake: ClientHello, then the server's flight
+# (ServerHello + EncryptedExtensions + Certificate + Finished), then the
+# client's Finished, after which application data flows encrypted.
+protocol "tls13" {
+  description = "TLS 1.3 1-RTT handshake + application data"
+
+  step "client_hello" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["TLS"] payload = "ClientHello key_share=X25519" }
+  }
+  step "rclient_hello" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["TLS"] }
+  }
+  # server flight (modeled as one combined record)
+  step "server_flight" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rclient_hello"]
+    segment    { flags = ["TLS"] payload = "ServerHello + EE + Cert + Finished" }
+  }
+  step "rserver_flight" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["client_hello"]
+    expect     { flags = ["TLS"] }
+  }
+  step "client_finished" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rserver_flight"]
+    segment    { flags = ["TLS"] payload = "Finished" }
+  }
+  step "rclient_finished" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["server_flight"]
+    expect     { flags = ["TLS"] payload = "Finished" }
+  }
+  # encrypted application data (client -> server)
+  step "app_req" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["client_finished"]
+    segment    { flags = ["TLS"] payload = "AppData: GET /" }
+  }
+  step "rapp_req" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["rclient_finished"]
+    expect     { flags = ["TLS"] }
+  }
+  step "app_resp" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rapp_req"]
+    segment    { flags = ["TLS"] payload = "AppData: 200 OK" }
+  }
+  step "rapp_resp" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["app_req"]
+    expect     { flags = ["TLS"] }
+  }
+  step "verify" {
+    role       = "client"
+    action     = "assert"
+    depends_on = ["rapp_resp"]
+    assert     { send_count = 3 recv_count = 2 }
+  }
+}

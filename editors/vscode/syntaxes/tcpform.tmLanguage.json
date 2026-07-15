@@ -1,0 +1,11 @@
+{
+  "scopeName": "source.tcpform",
+  "patterns": [
+    { "name": "comment.line.number-sign.tcpform", "match": "#.*$|//.*$" },
+    { "name": "keyword.control.tcpform", "match": "\\b(protocol|module|import|cases|case|step|transport|segment|expect|timer|assert|set|fault_when|header_schema)\\b" },
+    { "name": "constant.language.tcpform", "match": "\\b(true|false|null)\\b" },
+    { "name": "constant.numeric.tcpform", "match": "\\b[0-9]+(?:\\.[0-9]+)?\\b" },
+    { "name": "string.quoted.double.tcpform", "begin": "\"", "end": "\"", "patterns": [{"name":"constant.character.escape.tcpform","match":"\\\\."}] },
+    { "name": "variable.other.tcpform", "match": "\\$\\{[A-Za-z_][A-Za-z0-9_.-]*\\}" }
+  ]
+}

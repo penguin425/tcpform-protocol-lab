@@ -1,0 +1,45 @@
+# HTTP/1.0: a single GET request and response, then the connection closes.
+# HTTP/1.0 has no keep-alive by default, so one request per connection.
+protocol "http1_0" {
+  description = "HTTP/1.0 single request/response then close"
+
+  step "open" {
+    role   = "client"
+    action = "open"
+    mode   = "active"
+  }
+  step "request" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["open"]
+    segment    { flags = ["HTTP"] payload = "GET / HTTP/1.0" }
+  }
+  step "recv_req" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["HTTP"] }
+  }
+  step "response" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["recv_req"]
+    segment    { flags = ["HTTP"] payload = "HTTP/1.0 200 OK" }
+  }
+  step "recv_resp" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["request"]
+    expect     { flags = ["HTTP"] }
+  }
+  step "close" {
+    role       = "server"
+    action     = "close"
+    depends_on = ["response"]
+  }
+  step "verify" {
+    role       = "client"
+    action     = "assert"
+    depends_on = ["recv_resp"]
+    assert     { recv_count = 1 }
+  }
+}

@@ -1,0 +1,64 @@
+# HTTP/1.1 persistent connection (keep-alive): two pipelined requests reuse
+# one TCP connection. The server sends responses in request order.
+protocol "http1_1_keepalive" {
+  description = "HTTP/1.1 keep-alive: two requests on one connection"
+
+  step "open" {
+    role   = "client"
+    action = "open"
+    mode   = "active"
+  }
+  step "req1" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["open"]
+    segment    { flags = ["HTTP"] payload = "GET /a HTTP/1.1" }
+  }
+  step "rreq1" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["HTTP"] }
+  }
+  step "resp1" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rreq1"]
+    segment    { flags = ["HTTP"] payload = "HTTP/1.1 200 OK (a)" }
+  }
+  step "rresp1" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["req1"]
+    expect     { flags = ["HTTP"] }
+  }
+  step "req2" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rresp1"]
+    segment    { flags = ["HTTP"] payload = "GET /b HTTP/1.1" }
+  }
+  step "rreq2" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["resp1"]
+    expect     { flags = ["HTTP"] }
+  }
+  step "resp2" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rreq2"]
+    segment    { flags = ["HTTP"] payload = "HTTP/1.1 200 OK (b)" }
+  }
+  step "rresp2" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["req2"]
+    expect     { flags = ["HTTP"] }
+  }
+  step "verify" {
+    role       = "client"
+    action     = "assert"
+    depends_on = ["rresp2"]
+    assert     { send_count = 2 recv_count = 2 }
+  }
+}

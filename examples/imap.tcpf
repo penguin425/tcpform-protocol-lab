@@ -1,0 +1,119 @@
+# IMAP4rev1 session: LOGIN, SELECT INBOX, FETCH a message, LOGOUT. IMAP uses
+# tagged commands (e.g. A1, A2) so responses can be matched to requests.
+protocol "imap" {
+  description = "IMAP4rev1: login, select, fetch, logout"
+
+  step "open" {
+    role   = "client"
+    action = "open"
+    mode   = "active"
+  }
+  step "greeting" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["open"]
+    segment    { flags = ["IMAP"] payload = "* OK IMAP4rev1 ready" }
+  }
+  step "rgreeting" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["open"]
+    expect     { flags = ["IMAP"] }
+  }
+  step "login" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rgreeting"]
+    segment    { flags = ["IMAP"] payload = "A1 LOGIN alice secret" }
+  }
+  step "rlogin" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["greeting"]
+    expect     { flags = ["IMAP"] }
+  }
+  step "login_ok" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rlogin"]
+    segment    { flags = ["IMAP"] payload = "A1 OK LOGIN completed" }
+  }
+  step "rlogin_ok" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["login"]
+    expect     { flags = ["IMAP"] }
+  }
+  step "select" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rlogin_ok"]
+    segment    { flags = ["IMAP"] payload = "A2 SELECT INBOX" }
+  }
+  step "rselect" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["login_ok"]
+    expect     { flags = ["IMAP"] }
+  }
+  step "select_ok" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rselect"]
+    segment    { flags = ["IMAP"] payload = "* 2 EXISTS\r\nA2 OK SELECT completed" }
+  }
+  step "rselect_ok" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["select"]
+    expect     { flags = ["IMAP"] }
+  }
+  step "fetch" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rselect_ok"]
+    segment    { flags = ["IMAP"] payload = "A3 FETCH 1 BODY[]" }
+  }
+  step "rfetch" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["select_ok"]
+    expect     { flags = ["IMAP"] }
+  }
+  step "fetch_ok" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rfetch"]
+    segment    { flags = ["IMAP"] payload = "* 1 FETCH (BODY[] {180})\r\nA3 OK FETCH completed" }
+  }
+  step "rfetch_ok" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["fetch"]
+    expect     { flags = ["IMAP"] }
+  }
+  step "logout" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rfetch_ok"]
+    segment    { flags = ["IMAP"] payload = "A4 LOGOUT" }
+  }
+  step "rlogout" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["fetch_ok"]
+    expect     { flags = ["IMAP"] }
+  }
+  step "logout_ok" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rlogout"]
+    segment    { flags = ["IMAP"] payload = "* BYE\r\nA4 OK LOGOUT completed" }
+  }
+  step "rlogout_ok" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["logout"]
+    expect     { flags = ["IMAP"] }
+  }
+}

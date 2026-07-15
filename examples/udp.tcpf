@@ -1,0 +1,29 @@
+# UDP: connectionless datagram exchange. No handshake, no ACK, no reliability.
+# A request datagram and a response datagram; order is enforced only by
+# depends_on, since there is no connection state.
+protocol "udp_request_response" {
+  description = "UDP connectionless request/response"
+
+  step "req" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["UDP"] payload = "time?" }
+  }
+  step "rreq" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["UDP"] }
+  }
+  step "resp" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rreq"]
+    segment    { flags = ["UDP"] payload = "12:00:00" }
+  }
+  step "rresp" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["req"]
+    expect     { flags = ["UDP"] }
+  }
+}

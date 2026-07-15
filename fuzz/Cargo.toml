@@ -1,0 +1,26 @@
+[package]
+name = "tcpform-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tcpform = { path = ".." }
+
+[[bin]]
+name = "dsl"
+path = "fuzz_targets/dsl.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hex"
+path = "fuzz_targets/hex.rs"
+test = false
+doc = false
+bench = false

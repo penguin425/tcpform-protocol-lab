@@ -1,0 +1,107 @@
+# BitTorrent peer-wire protocol: both peers exchange a handshake (protocol
+# string + info hash + peer id), then bitfield messages (which pieces each
+# has), then the interested/unchoke exchange that allows piece requests.
+protocol "bittorrent" {
+  description = "BitTorrent peer wire: handshake, bitfield, interested/unchoke"
+
+  step "hs_a" {
+    role    = "peer_a"
+    action  = "send"
+    segment { flags = ["BT"] payload = "handshake infohash=H1 peer=A" }
+  }
+  step "hs_b" {
+    role    = "peer_b"
+    action  = "send"
+    segment { flags = ["BT"] payload = "handshake infohash=H1 peer=B" }
+  }
+  step "rhs_b" {
+    role       = "peer_a"
+    action     = "recv"
+    depends_on = ["hs_a"]
+    expect     { flags = ["BT"] payload = "handshake infohash=H1 peer=B" }
+  }
+  step "rhs_a" {
+    role       = "peer_b"
+    action     = "recv"
+    depends_on = ["hs_b"]
+    expect     { flags = ["BT"] payload = "handshake infohash=H1 peer=A" }
+  }
+  step "bf_a" {
+    role       = "peer_a"
+    action     = "send"
+    depends_on = ["rhs_b"]
+    segment    { flags = ["BT"] payload = "bitfield=11100000" }
+  }
+  step "bf_b" {
+    role       = "peer_b"
+    action     = "send"
+    depends_on = ["rhs_a"]
+    segment    { flags = ["BT"] payload = "bitfield=00011100" }
+  }
+  step "rbf_b" {
+    role       = "peer_a"
+    action     = "recv"
+    depends_on = ["bf_a"]
+    expect     { flags = ["BT"] }
+  }
+  step "rbf_a" {
+    role       = "peer_b"
+    action     = "recv"
+    depends_on = ["bf_b"]
+    expect     { flags = ["BT"] }
+  }
+  step "interested" {
+    role       = "peer_a"
+    action     = "send"
+    depends_on = ["rbf_b"]
+    segment    { flags = ["BT"] payload = "interested" }
+  }
+  step "rinterested" {
+    role       = "peer_b"
+    action     = "recv"
+    depends_on = ["rbf_a"]
+    expect     { flags = ["BT"] payload = "interested" }
+  }
+  step "unchoke" {
+    role       = "peer_b"
+    action     = "send"
+    depends_on = ["rinterested"]
+    segment    { flags = ["BT"] payload = "unchoke" }
+  }
+  step "runchoke" {
+    role       = "peer_a"
+    action     = "recv"
+    depends_on = ["interested"]
+    expect     { flags = ["BT"] payload = "unchoke" }
+  }
+  step "request" {
+    role       = "peer_a"
+    action     = "send"
+    depends_on = ["runchoke"]
+    segment    { flags = ["BT"] payload = "request piece=3 block=0" }
+  }
+  step "rrequest" {
+    role       = "peer_b"
+    action     = "recv"
+    depends_on = ["unchoke"]
+    expect     { flags = ["BT"] }
+  }
+  step "piece" {
+    role       = "peer_b"
+    action     = "send"
+    depends_on = ["rrequest"]
+    segment    { flags = ["BT"] payload = "piece=3 block=0 data=..." }
+  }
+  step "rpiece" {
+    role       = "peer_a"
+    action     = "recv"
+    depends_on = ["request"]
+    expect     { flags = ["BT"] }
+  }
+  step "verify" {
+    role       = "peer_a"
+    action     = "assert"
+    depends_on = ["rpiece"]
+    assert     { send_count = 4 recv_count = 4 }
+  }
+}

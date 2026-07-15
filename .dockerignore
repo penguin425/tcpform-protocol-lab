@@ -1,0 +1,9 @@
+target
+.git
+.agents
+.codex
+.github
+fuzz
+tests
+*.pcap
+*.pcapng

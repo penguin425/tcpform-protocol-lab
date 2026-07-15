@@ -1,0 +1,91 @@
+# Data-driven test suite for a DNS-like request/response protocol.
+#
+# The protocol uses ${var} interpolation so that case variables control the
+# query name, query type, and the expected response code. The `cases` block
+# runs the same protocol multiple times with different inputs and checks the
+# outcome (pass/fail) plus per-role post-run assertions.
+
+protocol "dns_lookup" {
+  description = "Parametric DNS query/response — driven by case variables"
+
+  step "query" {
+    role   = "client"
+    action = "send"
+    segment {
+      flags  = ["DNS"]
+      fields = { id = 1 name = "${qname}" qtype = "${qtype}" }
+    }
+  }
+
+  step "rquery" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["DNS"] }
+  }
+
+  # The server responds with the given rcode and answer.
+  step "response" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rquery"]
+    segment {
+      flags  = ["DNS"]
+      fields = { id = 1 rcode = "${resp_rcode}" answer = "${answer}" }
+    }
+  }
+
+  # The client receives the response and checks rcode against ${expect_rcode}.
+  # When resp_rcode != expect_rcode, this recv's field matcher fails → run fails.
+  step "rresponse" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["query"]
+    expect {
+      flags  = ["DNS"]
+      fields = { rcode = "${expect_rcode}" }
+    }
+  }
+
+  step "verify_rcode" {
+    role       = "client"
+    action     = "assert"
+    depends_on = ["rresponse"]
+    assert     { "recv_field:rcode" = "${expect_rcode}" }
+  }
+}
+
+cases "dns_lookup" {
+  case "valid_a_record" {
+    tags = ["smoke", "positive"]
+    vars { qname = "example.com" qtype = 1 resp_rcode = 0 expect_rcode = 0 answer = "93.184.216.34" }
+    assert_client { recv_count = 1 }
+  }
+
+  case "valid_aaaa_record" {
+    tags = ["positive"]
+    vars { qname = "example.com" qtype = 28 resp_rcode = 0 expect_rcode = 0 answer = "2606:2800:220:1:248:1893:25c8:1946" }
+    assert_client { recv_count = 1 }
+  }
+
+  case "nxdomain" {
+    tags = ["smoke", "negative"]
+    vars { qname = "nonexistent.test" qtype = 1 resp_rcode = 3 expect_rcode = 3 answer = "" }
+    assert_client { recv_count = 1 }
+  }
+
+  case "servfail" {
+    tags = ["negative"]
+    vars { qname = "slow.test" qtype = 1 resp_rcode = 2 expect_rcode = 2 answer = "" }
+    assert_client { recv_count = 1 }
+  }
+}
+
+# Negative test: the server sends rcode=3 but the client expects rcode=0,
+# so the recv field matcher fails and the run errors out.
+cases "dns_lookup" {
+  case "rcode_mismatch" {
+    tags = ["negative"]
+    vars { qname = "bad.test" qtype = 1 resp_rcode = 3 expect_rcode = 0 answer = "" }
+    expect = "fail"
+  }
+}

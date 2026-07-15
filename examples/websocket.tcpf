@@ -1,0 +1,79 @@
+# WebSocket lifecycle: HTTP Upgrade handshake, then a ping/pong keepalive
+# exchange, then the closing handshake (Close frames both ways).
+protocol "websocket" {
+  description = "WebSocket: upgrade, ping/pong, close"
+
+  # --- opening handshake (HTTP Upgrade) ---
+  step "upgrade" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["HTTP"] payload = "GET /ws HTTP/1.1\r\nUpgrade: websocket" }
+  }
+  step "rupgrade" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["HTTP"] }
+  }
+  step "switching" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rupgrade"]
+    segment    { flags = ["HTTP"] payload = "HTTP/1.1 101 Switching Protocols" }
+  }
+  step "rswitching" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["upgrade"]
+    expect     { flags = ["HTTP"] }
+  }
+  # --- ping/pong keepalive ---
+  step "ping" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rswitching"]
+    segment    { flags = ["WS"] payload = "PING" }
+  }
+  step "rping" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["switching"]
+    expect     { flags = ["WS"] }
+  }
+  step "pong" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rping"]
+    segment    { flags = ["WS"] payload = "PONG" }
+  }
+  step "rpong" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["ping"]
+    expect     { flags = ["WS"] }
+  }
+  # --- closing handshake ---
+  step "close" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rpong"]
+    segment    { flags = ["WS"] payload = "CLOSE" }
+  }
+  step "rclose" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["pong"]
+    expect     { flags = ["WS"] }
+  }
+  step "close_resp" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rclose"]
+    segment    { flags = ["WS"] payload = "CLOSE" }
+  }
+  step "rclose_resp" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["close"]
+    expect     { flags = ["WS"] }
+  }
+}

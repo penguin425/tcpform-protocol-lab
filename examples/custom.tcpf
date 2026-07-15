@@ -1,0 +1,40 @@
+# A tiny custom request/response protocol showing `to`, `from`, `wait`,
+# and payload matching — the building blocks for inventing new protocols.
+protocol "ping_pong" {
+  description = "Client pings; server pongs after a short wait"
+
+  step "ping" {
+    role   = "client"
+    action = "send"
+    to     = "server"
+    segment { flags = ["PING"] payload = "hello" }
+  }
+
+  step "recv_ping" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["PING"] from = "client" }
+  }
+
+  step "think" {
+    role       = "server"
+    action     = "wait"
+    depends_on = ["recv_ping"]
+    timer      { timeout = "50ms" }
+  }
+
+  step "pong" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["think"]
+    to         = "client"
+    segment    { flags = ["PONG"] payload = "world" }
+  }
+
+  step "recv_pong" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["ping"]
+    expect     { flags = ["PONG"] from = "server" }
+  }
+}

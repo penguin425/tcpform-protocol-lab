@@ -1,0 +1,67 @@
+# Structured message fields, capture, interpolation, and field-match operators.
+#
+# The client sends a DNS query with structured fields (id, name, qtype). The
+# server CAPTURES the `id` field into a variable, then builds its response
+# using `${txn_id}` interpolation so the response echoes the request's id.
+# The client verifies specific fields with operators (contains, range) —
+# partial matching, not full-message equality.
+protocol "structured_messages" {
+  description = "structured fields, capture, ${var} interpolation, field operators"
+
+  step "query" {
+    role   = "client"
+    action = "send"
+    segment {
+      flags = ["DNS"]
+      fields = { id = 4242 name = "example.com" qtype = 1 }
+    }
+  }
+
+  step "rquery" {
+    role   = "server"
+    action = "recv"
+    expect {
+      flags  = ["DNS"]
+      fields = { qtype = 1 name = "example.com" }
+      capture { id = "txn_id" }
+    }
+  }
+
+  # server echoes the captured id back via ${txn_id} interpolation
+  step "response" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rquery"]
+    segment {
+      flags  = ["DNS"]
+      fields = { id = "${txn_id}" name = "example.com" rdata = "93.184.216.34" ttl = 300 }
+    }
+  }
+
+  step "rresponse" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["query"]
+    expect {
+      flags  = ["DNS"]
+      # partial field match: only check id (exact) and rdata (contains)
+      fields = { id = 4242 rdata = { contains = "216.34" } ttl = { min = 60 max = 3600 } }
+    }
+  }
+
+  # assert on a received field without capturing
+  step "verify_id" {
+    role       = "client"
+    action     = "assert"
+    depends_on = ["rresponse"]
+    assert     { "recv_field:rdata" = "93.184.216.34" }
+  }
+
+  # server asserts the captured variable
+  step "verify_capture" {
+    role       = "server"
+    action     = "assert"
+    depends_on = ["response"]
+    assert     { txn_id = 4242 }
+  }
+}

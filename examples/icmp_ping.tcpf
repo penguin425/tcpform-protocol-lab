@@ -1,0 +1,65 @@
+# ICMP echo (ping): the client sends Echo Request datagrams and the server
+# replies with Echo Reply. Models the L3 reachability check repeated 3 times.
+protocol "icmp_ping" {
+  description = "ICMP echo request/reply (ping x3)"
+
+  step "echo1" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["ICMP"] payload = "echo-request id=1 seq=1" }
+  }
+  step "reply1" {
+    role       = "server"
+    action     = "send"
+    expect     { flags = ["ICMP"] }
+    segment    { flags = ["ICMP"] payload = "echo-reply id=1 seq=1" }
+  }
+  step "rreply1" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["echo1"]
+    expect     { flags = ["ICMP"] payload = "echo-reply id=1 seq=1" }
+  }
+  step "echo2" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rreply1"]
+    segment    { flags = ["ICMP"] payload = "echo-request id=1 seq=2" }
+  }
+  step "reply2" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["reply1"]
+    segment    { flags = ["ICMP"] payload = "echo-reply id=1 seq=2" }
+  }
+  step "rreply2" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["echo2"]
+    expect     { flags = ["ICMP"] payload = "echo-reply id=1 seq=2" }
+  }
+  step "echo3" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rreply2"]
+    segment    { flags = ["ICMP"] payload = "echo-request id=1 seq=3" }
+  }
+  step "reply3" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["reply2"]
+    segment    { flags = ["ICMP"] payload = "echo-reply id=1 seq=3" }
+  }
+  step "rreply3" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["echo3"]
+    expect     { flags = ["ICMP"] payload = "echo-reply id=1 seq=3" }
+  }
+  step "verify" {
+    role       = "client"
+    action     = "assert"
+    depends_on = ["rreply3"]
+    assert     { send_count = 3 recv_count = 3 }
+  }
+}

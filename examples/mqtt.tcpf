@@ -1,0 +1,111 @@
+# MQTT 3.1.1: CONNECT/CONNACK, then PUBLISH (QoS 0) and a SUBSCRIBE round,
+# then PINGREQ/PINGRESP keepalive, then DISCONNECT. Demonstrates a pub/sub
+# broker session with an active client and a broker role.
+protocol "mqtt" {
+  description = "MQTT session: connect, publish, subscribe, keepalive, disconnect"
+
+  step "connect" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["MQTT"] payload = "CONNECT client=c1 keepalive=60" }
+  }
+  step "rconnect" {
+    role   = "broker"
+    action = "recv"
+    expect { flags = ["MQTT"] }
+  }
+  step "connack" {
+    role       = "broker"
+    action     = "send"
+    depends_on = ["rconnect"]
+    segment    { flags = ["MQTT"] payload = "CONNACK rc=0" }
+  }
+  step "rconnack" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["connect"]
+    expect     { flags = ["MQTT"] }
+  }
+  # publish a message (QoS 0, fire-and-forget)
+  step "publish" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rconnack"]
+    segment    { flags = ["MQTT"] payload = "PUBLISH topic=sensors temp=22" }
+  }
+  step "rpublish" {
+    role       = "broker"
+    action     = "recv"
+    depends_on = ["connack"]
+    expect     { flags = ["MQTT"] }
+  }
+  # subscribe to a topic
+  step "subscribe" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["publish"]
+    segment    { flags = ["MQTT"] payload = "SUBSCRIBE id=1 topic=alerts" }
+  }
+  step "rsubscribe" {
+    role       = "broker"
+    action     = "recv"
+    depends_on = ["rpublish"]
+    expect     { flags = ["MQTT"] }
+  }
+  step "suback" {
+    role       = "broker"
+    action     = "send"
+    depends_on = ["rsubscribe"]
+    segment    { flags = ["MQTT"] payload = "SUBACK id=1 qos=0" }
+  }
+  step "rsuback" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["subscribe"]
+    expect     { flags = ["MQTT"] }
+  }
+  # keepalive
+  step "pingreq" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rsuback"]
+    segment    { flags = ["MQTT"] payload = "PINGREQ" }
+  }
+  step "rpingreq" {
+    role       = "broker"
+    action     = "recv"
+    depends_on = ["suback"]
+    expect     { flags = ["MQTT"] }
+  }
+  step "pingresp" {
+    role       = "broker"
+    action     = "send"
+    depends_on = ["rpingreq"]
+    segment    { flags = ["MQTT"] payload = "PINGRESP" }
+  }
+  step "rpingresp" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["pingreq"]
+    expect     { flags = ["MQTT"] }
+  }
+  # graceful disconnect
+  step "disconnect" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rpingresp"]
+    segment    { flags = ["MQTT"] payload = "DISCONNECT" }
+  }
+  step "rdisconnect" {
+    role       = "broker"
+    action     = "recv"
+    depends_on = ["pingresp"]
+    expect     { flags = ["MQTT"] }
+  }
+  step "verify" {
+    role       = "broker"
+    action     = "assert"
+    depends_on = ["rdisconnect"]
+    assert     { recv_count = 5 send_count = 3 }
+  }
+}

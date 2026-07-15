@@ -1,0 +1,71 @@
+# gRPC server-streaming RPC: the client sends one request; the server streams
+# back a sequence of response messages (here 3) on the same HTTP/2 stream,
+# then a trailer/status. Demonstrates a streaming response pattern.
+protocol "grpc_server_streaming" {
+  description = "gRPC server-streaming RPC over HTTP/2"
+
+  step "req" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["HEADERS"] stream = 1 payload = ":path=/watch" }
+  }
+  step "rreq" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["HEADERS"] stream = 1 }
+  }
+  step "data1" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rreq"]
+    segment    { flags = ["DATA"] stream = 1 payload = "event-1" }
+  }
+  step "data2" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["data1"]
+    segment    { flags = ["DATA"] stream = 1 payload = "event-2" }
+  }
+  step "data3" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["data2"]
+    segment    { flags = ["DATA"] stream = 1 payload = "event-3" }
+  }
+  step "trailers" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["data3"]
+    segment    { flags = ["HEADERS"] stream = 1 payload = "grpc-status=0" }
+  }
+  step "rdata1" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["req"]
+    expect     { flags = ["DATA"] stream = 1 }
+  }
+  step "rdata2" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["rdata1"]
+    expect     { flags = ["DATA"] stream = 1 }
+  }
+  step "rdata3" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["rdata2"]
+    expect     { flags = ["DATA"] stream = 1 }
+  }
+  step "rtrailers" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["rdata3"]
+    expect     { flags = ["HEADERS"] stream = 1 payload = "grpc-status=0" }
+  }
+  step "verify" {
+    role       = "client"
+    action     = "assert"
+    depends_on = ["rtrailers"]
+    assert     { send_count = 1 recv_count = 4 }
+  }
+}

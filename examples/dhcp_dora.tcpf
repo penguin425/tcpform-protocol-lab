@@ -1,0 +1,65 @@
+# DHCP DORA: Discover, Offer, Request, Acknowledge. The client broadcasts a
+# Discover; the server Offers a lease; the client Requests it; the server
+# Acks. Demonstrates the L2/L3 address-acquisition handshake.
+protocol "dhcp_dora" {
+  description = "DHCP DORA: Discover/Offer/Request/Ack"
+
+  step "discover" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["DHCP"] payload = "DISCOVER xid=0x11 ciaddr=0.0.0.0" }
+  }
+  step "rdiscover" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["DHCP"] }
+  }
+  step "offer" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rdiscover"]
+    segment    { flags = ["DHCP"] payload = "OFFER yiaddr=192.0.2.50" }
+  }
+  step "roffer" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["discover"]
+    expect     { flags = ["DHCP"] }
+  }
+  step "request" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["roffer"]
+    segment    { flags = ["DHCP"] payload = "REQUEST yiaddr=192.0.2.50" }
+  }
+  step "rrequest" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["offer"]
+    expect     { flags = ["DHCP"] }
+  }
+  step "ack" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rrequest"]
+    segment    { flags = ["DHCP"] payload = "ACK yiaddr=192.0.2.50 lease=86400" }
+  }
+  step "rack" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["request"]
+    expect     { flags = ["DHCP"] }
+  }
+  step "lease_acquired" {
+    role       = "client"
+    action     = "set"
+    depends_on = ["rack"]
+    set        { ip = "192.0.2.50" lease = 86400 }
+  }
+  step "verify" {
+    role       = "client"
+    action     = "assert"
+    depends_on = ["lease_acquired"]
+    assert     { ip = "192.0.2.50" lease = 86400 recv_count = 2 }
+  }
+}

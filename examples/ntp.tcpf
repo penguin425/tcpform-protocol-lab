@@ -1,0 +1,34 @@
+# NTP: the client sends one time-sync datagram; the server responds with
+# timestamps. Single request/response, connectionless.
+protocol "ntp" {
+  description = "NTP time synchronization (single exchange)"
+
+  step "request" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["NTP"] payload = "client-timestamp=T1" }
+  }
+  step "rrequest" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["NTP"] }
+  }
+  step "response" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rrequest"]
+    segment    { flags = ["NTP"] payload = "T1 T2 T3 T4" }
+  }
+  step "rresponse" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["request"]
+    expect     { flags = ["NTP"] }
+  }
+  step "compute_offset" {
+    role       = "client"
+    action     = "log"
+    depends_on = ["rresponse"]
+    message    = "offset computed from T1..T4"
+  }
+}

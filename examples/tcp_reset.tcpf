@@ -1,0 +1,33 @@
+# Abortive connection close: the server sends an RST and tears the connection
+# down without a graceful FIN exchange. Demonstrates `reset` and `aborted`.
+protocol "tcp_reset" {
+  description = "TCP abortive close via RST"
+
+  step "data" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["PSH", "ACK"] payload = "hi" }
+  }
+  step "rdata" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["PSH"] }
+  }
+  step "rst" {
+    role       = "server"
+    action     = "reset"
+    depends_on = ["rdata"]
+    segment    { flags = ["RST", "ACK"] }
+  }
+  step "rrst" {
+    role       = "client"
+    action     = "recv"
+    expect     { flags = ["RST"] }
+  }
+  step "verify" {
+    role       = "server"
+    action     = "assert"
+    depends_on = ["rst"]
+    assert     { aborted = true send_count = 1 }
+  }
+}

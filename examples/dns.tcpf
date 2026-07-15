@@ -1,0 +1,34 @@
+# DNS query/response over UDP. The client sends a query with a transaction
+# id; the server resolves and replies with the same id. No connection, no ack.
+protocol "dns" {
+  description = "DNS query/response (UDP)"
+
+  step "query" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["DNS"] payload = "id=0x1234 q=example.com A" }
+  }
+  step "rquery" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["DNS"] }
+  }
+  step "response" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rquery"]
+    segment    { flags = ["DNS"] payload = "id=0x1234 a=93.184.216.34" }
+  }
+  step "rresponse" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["query"]
+    expect     { flags = ["DNS"] payload = "id=0x1234 a=93.184.216.34" }
+  }
+  step "verify" {
+    role       = "client"
+    action     = "assert"
+    depends_on = ["rresponse"]
+    assert     { recv_count = 1 }
+  }
+}

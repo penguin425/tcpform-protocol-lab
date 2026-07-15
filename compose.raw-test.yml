@@ -1,0 +1,101 @@
+name: tcpform-raw-lab
+
+x-raw-node: &raw-node
+  build:
+    context: .
+    target: runtime
+  read_only: true
+  cap_drop:
+    - ALL
+  cap_add:
+    - NET_RAW
+    - SETUID
+    - SETGID
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  volumes:
+    - ${TCPFORM_ARTIFACTS:-./target/docker-raw}:/artifacts
+  networks:
+    raw_lab: {}
+
+services:
+  raw-server:
+    <<: *raw-node
+    mac_address: "02:42:ac:1e:00:03"
+    command:
+      - run
+      - --raw
+      - --interface
+      - eth0
+      - --role
+      - server
+      - --allow-host-tcp
+      - --drop-uid
+      - "10001"
+      - --drop-gid
+      - "10001"
+      - --json
+      - --json-file
+      - ${TCPFORM_SERVER_JSON:-/artifacts/server.json}
+      - --pcap
+      - ${TCPFORM_SERVER_PCAP:-/artifacts/server.pcap}
+      - ${TCPFORM_SCENARIO:-/scenarios/raw_docker_udp.tcpf}
+      - ${TCPFORM_PROTOCOL:-docker_raw_udp}
+    networks:
+      raw_lab:
+        ipv4_address: 172.30.0.3
+
+  raw-client:
+    <<: *raw-node
+    mac_address: "02:42:ac:1e:00:02"
+    depends_on:
+      - raw-server
+    command:
+      - run
+      - --raw
+      - --interface
+      - eth0
+      - --role
+      - client
+      - --allow-host-tcp
+      - --drop-uid
+      - "10001"
+      - --drop-gid
+      - "10001"
+      - --json
+      - --json-file
+      - ${TCPFORM_CLIENT_JSON:-/artifacts/client.json}
+      - --pcap
+      - ${TCPFORM_CLIENT_PCAP:-/artifacts/client.pcap}
+      - ${TCPFORM_SCENARIO:-/scenarios/raw_docker_udp.tcpf}
+      - ${TCPFORM_PROTOCOL:-docker_raw_udp}
+    networks:
+      raw_lab:
+        ipv4_address: 172.30.0.2
+
+  dashboard:
+    profiles: ["visual"]
+    build:
+      context: .
+      target: dashboard
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /var/cache/nginx:size=8m,mode=0755,uid=101,gid=101
+      - /var/run:size=1m,mode=0755,uid=101,gid=101
+    ports:
+      - "${TCPFORM_DASHBOARD_PORT:-8088}:8080"
+    volumes:
+      - ${TCPFORM_ARTIFACTS:-./target/docker-raw}:/usr/share/nginx/html/data:ro
+
+networks:
+  raw_lab:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

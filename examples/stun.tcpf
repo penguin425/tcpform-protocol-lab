@@ -1,0 +1,41 @@
+# STUN binding request/response used for NAT traversal. The client sends a
+# Binding Request; the server echoes back the mapped (reflexive) transport
+# address so the client learns its public endpoint.
+protocol "stun" {
+  description = "STUN binding request/response (NAT traversal)"
+
+  step "binding_request" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["STUN"] payload = "BindingRequest tx=0xABCD" }
+  }
+  step "rrequest" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["STUN"] }
+  }
+  step "binding_response" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rrequest"]
+    segment    { flags = ["STUN"] payload = "BindingSuccessResp tx=0xABCD mapped=203.0.113.7:40000" }
+  }
+  step "rresponse" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["binding_request"]
+    expect     { flags = ["STUN"] }
+  }
+  step "learned_reflexive" {
+    role       = "client"
+    action     = "set"
+    depends_on = ["rresponse"]
+    set        { reflexive_ip = "203.0.113.7" reflexive_port = 40000 }
+  }
+  step "verify" {
+    role       = "client"
+    action     = "assert"
+    depends_on = ["learned_reflexive"]
+    assert     { reflexive_ip = "203.0.113.7" reflexive_port = 40000 }
+  }
+}

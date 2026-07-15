@@ -1,0 +1,46 @@
+# Automatic retransmission after an explicitly injected first-packet loss.
+# A small transport-level delay is applied to every delivered segment.
+protocol "retransmit_transport" {
+  description = "Automatic retransmission with transport latency"
+
+  transport {
+    delay     = "5ms"
+    loss_rate = 0.0
+    reorder   = false
+    seed      = 42
+  }
+
+  step "request" {
+    role   = "client"
+    action = "send"
+    segment { flags = ["REQUEST"] payload = "hello" }
+  }
+
+  step "recv_response" {
+    role       = "client"
+    action     = "recv"
+    retransmit = 1
+    expect { flags = ["RESPONSE"] }
+    timer { timeout = "50ms" }
+  }
+
+  step "drop_first_request" {
+    role   = "server"
+    action = "drop"
+    expect { flags = ["REQUEST"] }
+    timer { timeout = "100ms" }
+  }
+
+  step "recv_retry" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["REQUEST"] }
+    timer { timeout = "100ms" }
+  }
+
+  step "response" {
+    role   = "server"
+    action = "send"
+    segment { flags = ["RESPONSE"] payload = "ok" delay = "5ms" }
+  }
+}

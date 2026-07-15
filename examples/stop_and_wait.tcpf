@@ -1,0 +1,52 @@
+# Stop-and-wait ARQ: send one frame, wait for its ACK, send the next. The
+# simplest reliable-transfer scheme; each frame must be acknowledged before
+# the next is sent.
+protocol "stop_and_wait" {
+  description = "Stop-and-wait ARQ: one frame in flight at a time"
+
+  step "f0" {
+    role    = "sender"
+    action  = "send"
+    segment { flags = ["DATA"] seq = 0 payload = "frame-0" }
+  }
+  step "r0" {
+    role   = "receiver"
+    action = "recv"
+    expect { flags = ["DATA"] }
+  }
+  step "ack0" {
+    role       = "receiver"
+    action     = "ack"
+    depends_on = ["r0"]
+    segment    { flags = ["ACK"] ack = 1 }
+  }
+  step "rack0" {
+    role       = "sender"
+    action     = "recv"
+    expect     { flags = ["ACK"] }
+  }
+  step "f1" {
+    role       = "sender"
+    action     = "send"
+    depends_on = ["rack0"]
+    segment    { flags = ["DATA"] seq = 1 payload = "frame-1" }
+  }
+  step "r1" {
+    role       = "receiver"
+    action     = "recv"
+    depends_on = ["ack0"]
+    expect     { flags = ["DATA"] }
+  }
+  step "ack1" {
+    role       = "receiver"
+    action     = "ack"
+    depends_on = ["r1"]
+    segment    { flags = ["ACK"] ack = 2 }
+  }
+  step "rack1" {
+    role       = "sender"
+    action     = "recv"
+    depends_on = ["f1"]
+    expect     { flags = ["ACK"] }
+  }
+}

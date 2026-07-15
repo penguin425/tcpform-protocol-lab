@@ -1,0 +1,60 @@
+# TCP four-way teardown (full close): FIN, ACK, FIN, ACK.
+# Demonstrates the `ack` action, which auto-computes the ack number from the
+# last segment the role received.
+protocol "tcp_teardown" {
+  description = "TCP four-way teardown: FIN, ACK, FIN, ACK"
+
+  step "fin1" {
+    role   = "client"
+    action = "send"
+    segment { flags = ["FIN", "ACK"] seq = 2000 ack = 5001 }
+  }
+
+  step "recv_fin1" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["FIN"] }
+  }
+
+  step "ack_fin1" {
+    role       = "server"
+    action     = "ack"
+    depends_on = ["recv_fin1"]
+    segment    { flags = ["ACK"] }
+  }
+
+  step "recv_ack1" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["fin1"]
+    expect     { flags = ["ACK"] }
+  }
+
+  step "fin2" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["ack_fin1"]
+    segment    { flags = ["FIN", "ACK"] seq = 5001 ack = 2001 }
+  }
+
+  step "recv_fin2" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["recv_ack1"]
+    expect     { flags = ["FIN"] }
+  }
+
+  step "ack_fin2" {
+    role       = "client"
+    action     = "ack"
+    depends_on = ["recv_fin2"]
+    segment    { flags = ["ACK"] }
+  }
+
+  step "recv_ack2" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["fin2"]
+    expect     { flags = ["ACK"] }
+  }
+}

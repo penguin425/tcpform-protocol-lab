@@ -1,0 +1,10 @@
+# Intentionally invalid template used to demonstrate plan-time validation.
+protocol "error_dependency" {
+  step "cannot_start" {
+    role = "client"
+    action = "send"
+    to = "server"
+    depends_on = ["missing_handshake"]
+    segment { flags = ["DATA"] }
+  }
+}

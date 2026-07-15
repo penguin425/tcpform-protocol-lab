@@ -1,0 +1,62 @@
+# SYN loss and retransmission: the server DROPS the first SYN; the client
+# waits (simulating a retransmission timer) and sends it again, after which
+# the normal handshake completes. Demonstrates `drop` for fault injection.
+protocol "tcp_syn_retransmit" {
+  description = "TCP handshake with SYN loss + retransmit"
+
+  step "syn1" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["SYN"] seq = 1000 }
+  }
+  # server discards the first SYN (simulated loss)
+  step "drop_syn" {
+    role   = "server"
+    action = "drop"
+    expect { flags = ["SYN"] from = "client" }
+    timer  { timeout = "500ms" }
+  }
+  # client's retransmission timer fires
+  step "timeout" {
+    role       = "client"
+    action     = "wait"
+    depends_on = ["syn1"]
+    timer      { timeout = "200ms" }
+  }
+  step "syn2" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["timeout"]
+    segment    { flags = ["SYN"] seq = 1000 }
+  }
+  step "recv_syn" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["drop_syn"]
+    expect     { flags = ["SYN"] }
+  }
+  step "syn_ack" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["recv_syn"]
+    segment    { flags = ["SYN", "ACK"] seq = 5000 ack = 1001 }
+  }
+  step "recv_syn_ack" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["syn2"]
+    expect     { flags = ["SYN", "ACK"] }
+  }
+  step "ack" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["recv_syn_ack"]
+    segment    { flags = ["ACK"] ack = 5001 }
+  }
+  step "recv_ack" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["syn_ack"]
+    expect     { flags = ["ACK"] }
+  }
+}

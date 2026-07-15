@@ -1,0 +1,34 @@
+{
+  "name": "tcpform",
+  "displayName": "tcpform DSL",
+  "description": "Language support powered by the tcpform LSP",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Programming Languages", "Formatters"],
+  "activationEvents": ["onLanguage:tcpform"],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [{
+      "id": "tcpform",
+      "aliases": ["tcpform"],
+      "extensions": [".tcpf"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "tcpform",
+      "scopeName": "source.tcpform",
+      "path": "./syntaxes/tcpform.tmLanguage.json"
+    }],
+    "configuration": {
+      "title": "tcpform",
+      "properties": {
+        "tcpform.executable": {
+          "type": "string",
+          "default": "tcpform",
+          "description": "Path to the tcpform executable"
+        }
+      }
+    }
+  },
+  "dependencies": { "vscode-languageclient": "^9.0.1" }
+}

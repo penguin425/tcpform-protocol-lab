@@ -1,0 +1,7 @@
+module "shared" {
+  protocol "echo" {
+    description = "Protocol loaded through import and namespaced module"
+    step "send" { role = "a" action = "send" segment { flags = ["ECHO"] } }
+    step "recv" { role = "b" action = "recv" expect { flags = ["ECHO"] } }
+  }
+}

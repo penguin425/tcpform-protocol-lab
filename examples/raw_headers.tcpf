@@ -1,0 +1,46 @@
+# Safe in-memory raw-header example. Add Ethernet blocks and use
+# `tcpform run --raw --interface ...` only in an authorized lab network.
+protocol "raw_udp" {
+  clock = "virtual"
+
+  step "request" {
+    role = "client"
+    action = "send_raw"
+    to = "server"
+    mtu = 1280
+
+    ipv6 {
+      source = "2001:db8::10"
+      destination = "2001:db8::20"
+      traffic_class = 40
+      flow_label = 74565
+      hop_limit = 32
+    }
+    udp {
+      source_port = 53000
+      destination_port = 53
+    }
+    segment { hex = "1234 0100 0001 0000 0000 0000" }
+  }
+
+  step "receive" {
+    role = "server"
+    action = "recv_raw"
+    expect {
+      from = "client"
+      fields = {
+        "ipv6.source" = "2001:db8::10"
+        "ipv6.hop_limit" = 32
+        "udp.destination_port" = 53
+        "transport.checksum_valid" = true
+      }
+      capture { "udp.source_port" = "client_port" }
+    }
+  }
+
+  step "verify" {
+    role = "server"
+    action = "assert"
+    assert { client_port = 53000 }
+  }
+}

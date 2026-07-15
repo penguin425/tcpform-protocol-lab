@@ -1,0 +1,31 @@
+# tcpform-version: 2
+# Deterministic connection-error templates for flow/error visualization.
+
+protocol "dns_failure" {
+  description = "DNS lookup fails before a connection is established"
+  transport { connect_failure = "dns" }
+  step "resolve_and_open" { role = "client" action = "open" }
+  step "never_sent" { role = "client" action = "send" segment { payload = "request" } }
+}
+
+protocol "connection_refused" {
+  description = "The remote endpoint refuses the connection"
+  transport { connect_failure = "refused" }
+  step "open" { role = "client" action = "open" }
+}
+
+protocol "tls_handshake_failure" {
+  description = "TLS negotiation fails during connection setup"
+  transport { connect_failure = "tls_handshake" }
+  step "tls_open" { role = "client" action = "open" }
+}
+
+cases "dns_failure" {
+  case "expected DNS failure" { expect = "fail" }
+}
+cases "connection_refused" {
+  case "expected refusal" { expect = "fail" }
+}
+cases "tls_handshake_failure" {
+  case "expected TLS failure" { expect = "fail" }
+}

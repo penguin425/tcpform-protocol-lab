@@ -1,0 +1,103 @@
+# End-to-end raw Ethernet/IPv4/UDP exchange for compose.raw-test.yml.
+# Docker provides an isolated bridge and fixed IP/MAC addresses. Both peers
+# capture with AF_PACKET and never open a kernel UDP socket.
+protocol "docker_raw_udp" {
+  step "client_startup_grace" {
+    role = "client"
+    action = "wait"
+    timer { timeout = "500ms" }
+  }
+
+  step "request" {
+    role = "client"
+    action = "send_raw"
+    to = "server"
+    ethernet {
+      source = "02:42:ac:1e:00:02"
+      destination = "02:42:ac:1e:00:03"
+    }
+    ipv4 {
+      source = "172.30.0.2"
+      destination = "172.30.0.3"
+      dscp = 10
+      ecn = 1
+      id = 4660
+      ttl = 37
+    }
+    udp {
+      source_port = 41000
+      destination_port = 42000
+    }
+    segment { hex = "746370666f726d2d72657175657374" }
+  }
+
+  step "receive_request" {
+    role = "server"
+    action = "recv_raw"
+    timer { timeout = "5s" }
+    expect {
+      from = "client"
+      fields = {
+        "raw.payload" = { hex = "746370666f726d2d72657175657374" }
+        "ethernet.source" = "02:42:ac:1e:00:02"
+        "ipv4.source" = "172.30.0.2"
+        "ipv4.dscp" = 10
+        "ipv4.ecn" = 1
+        "ipv4.ttl" = 37
+        "ipv4.checksum_valid" = true
+        "udp.source_port" = 41000
+        "udp.destination_port" = 42000
+        "transport.checksum_valid" = true
+      }
+    }
+  }
+
+  step "response" {
+    role = "server"
+    action = "send_raw"
+    to = "client"
+    ethernet {
+      source = "02:42:ac:1e:00:03"
+      destination = "02:42:ac:1e:00:02"
+    }
+    ipv4 {
+      source = "172.30.0.3"
+      destination = "172.30.0.2"
+      id = 22136
+      ttl = 41
+    }
+    udp {
+      source_port = 42000
+      destination_port = 41000
+    }
+    segment { hex = "746370666f726d2d726573706f6e7365" }
+  }
+
+  step "receive_response" {
+    role = "client"
+    action = "recv_raw"
+    retransmit = 4
+    timer { timeout = "250ms" }
+    expect {
+      from = "server"
+      fields = {
+        "raw.payload" = { hex = "746370666f726d2d726573706f6e7365" }
+        "ethernet.source" = "02:42:ac:1e:00:03"
+        "ipv4.source" = "172.30.0.3"
+        "ipv4.ttl" = 41
+        "ipv4.checksum_valid" = true
+        "udp.source_port" = 42000
+        "udp.destination_port" = 41000
+        "transport.checksum_valid" = true
+      }
+    }
+  }
+
+  # Keep the server alive briefly so Compose observes the client—the selected
+  # exit-code service—finishing first after it validates the response.
+  step "server_capture_grace" {
+    role = "server"
+    action = "wait"
+    timer { timeout = "750ms" }
+  }
+}

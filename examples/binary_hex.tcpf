@@ -1,0 +1,71 @@
+# Binary wire messages using hex. Demonstrates:
+# - `hex = "..."` to send raw binary payloads
+# - `hex = "..."` in expect to match exact binary
+# - `hex_contains = "..."` to match a binary substring
+# - binary field values via `fields = { key = { hex = "..." } }`
+# - `hex_contains` field operator
+# - capture of a binary field and ${var} interpolation back into a hex payload
+#
+# Scenario: a client sends a binary DNS query with a 2-byte transaction id
+# (0x1234) and a QNAME. The server captures the id, then responds with a
+# binary answer that echoes the id. The client verifies the response contains
+# the expected IP address bytes.
+
+protocol "binary_hex" {
+  description = "binary payloads via hex, hex_contains, binary fields, capture+interpolate"
+
+  step "query" {
+    role   = "client"
+    action = "send"
+    segment {
+      flags = ["DNS"]
+      # DNS query: id=0x1234, flags=0x0100, qdcount=1, qname=example.com
+      hex = "1234 0100 0001 0000 0000 0000 07 6578616d706c65 03 636f6d 00"
+      fields = { id = { hex = "1234" } qname = "example.com" }
+    }
+  }
+
+  step "rquery" {
+    role   = "server"
+    action = "recv"
+    expect {
+      flags         = ["DNS"]
+      hex_contains  = "6578616d706c65"    # "example" in the QNAME
+      fields        = { qname = "example.com" }
+      capture       { id = "txn_id" }
+    }
+  }
+
+  # Server builds the response: echoes the captured transaction id
+  step "response" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rquery"]
+    segment {
+      flags  = ["DNS"]
+      # id=${txn_id} (hex-interpolated), flags=0x8180, answer with A record
+      hex    = "${txn_id} 8180 0001 0001 0000 0000 07 6578616d706c65 03 636f6d 00 c00c 0001 0001 000003c0 04 5db8d822"
+      fields = { id = { hex = "${txn_id}" } rdata = { hex = "5db8d822" } }
+    }
+  }
+
+  step "rresponse" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["query"]
+    expect {
+      flags  = ["DNS"]
+      # Verify the transaction id matches exactly
+      hex    = "1234 8180 0001 0001 0000 0000 07 6578616d706c65 03 636f6d 00 c00c 0001 0001 000003c0 04 5db8d822"
+      # Also verify the rdata field contains the IP bytes (93.184.216.34)
+      fields = { id = { hex = "1234" } rdata = { hex_contains = "5db8d822" } }
+    }
+  }
+
+  step "verify" {
+    role       = "server"
+    action     = "assert"
+    depends_on = ["response"]
+    assert     { "recv_field:id" = { hex = "1234" } }
+  }
+}

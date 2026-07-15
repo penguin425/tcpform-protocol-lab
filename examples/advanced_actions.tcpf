@@ -1,0 +1,33 @@
+protocol "advanced_actions" {
+  description = "Corruption, retry, loop and extended field matching"
+
+  step "corrupt_three" {
+    role   = "sender"
+    action = "corrupt"
+    loop   = 3
+    segment {
+      flags  = ["DATA"]
+      hex    = "deadbeef"
+      flip   = 3
+      delay  = "15ms"
+      fields = { path = "/api/items.json" email = "ops@example.com" }
+    }
+  }
+
+  step "receive_three" {
+    role       = "receiver"
+    action     = "recv"
+    loop       = 3
+    retry      = 1
+    on_timeout = true
+    expect {
+      flags = ["DATA"]
+      hex   = "ceadbeef"
+      fields = {
+        path  = { suffix = ".json" }
+        email = { regex = ".*@example\\.com$" }
+      }
+    }
+    timer { timeout = "10ms" }
+  }
+}

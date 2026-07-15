@@ -1,0 +1,51 @@
+# Intentional failure used by the visualizer. The server discards the request,
+# retries its receive once, then times out. Every later step stays unexecuted.
+protocol "docker_error_flow" {
+  clock = "virtual"
+  description = "Intentional recv timeout with retry and unexecuted downstream steps"
+
+  step "request" {
+    role = "client"
+    action = "send"
+    to = "server"
+    segment { flags = ["REQUEST"] payload = "will-be-dropped" }
+  }
+
+  step "drop_request" {
+    role = "server"
+    action = "drop"
+    expect { from = "client" flags = ["REQUEST"] }
+    timer { timeout = "20ms" }
+  }
+
+  step "receive_request" {
+    role = "server"
+    action = "recv"
+    retry = 1
+    on_timeout = true
+    retry_delay = "10ms"
+    expect { from = "client" flags = ["REQUEST"] }
+    timer { timeout = "20ms" }
+  }
+
+  step "verify_request" {
+    role = "server"
+    action = "assert"
+    assert { recv_count = 1 }
+  }
+
+  step "response" {
+    role = "server"
+    action = "send"
+    to = "client"
+    segment { flags = ["RESPONSE"] payload = "never-sent" }
+  }
+
+  step "receive_response" {
+    role = "client"
+    action = "recv"
+    depends_on = ["response"]
+    expect { from = "server" flags = ["RESPONSE"] }
+    timer { timeout = "20ms" }
+  }
+}

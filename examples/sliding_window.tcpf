@@ -1,0 +1,71 @@
+# Sliding window: the sender transmits 3 data segments back-to-back (window
+# size 3) before requiring any ACK, then the receiver ACKs them. Models
+# pipelined reliable transfer.
+protocol "sliding_window" {
+  description = "Sliding window: 3 frames in flight, then cumulative ACKs"
+
+  step "w0" {
+    role    = "sender"
+    action  = "send"
+    segment { flags = ["DATA"] seq = 0 payload = "w0" }
+  }
+  step "w1" {
+    role       = "sender"
+    action     = "send"
+    depends_on = ["w0"]
+    segment    { flags = ["DATA"] seq = 1 payload = "w1" }
+  }
+  step "w2" {
+    role       = "sender"
+    action     = "send"
+    depends_on = ["w1"]
+    segment    { flags = ["DATA"] seq = 2 payload = "w2" }
+  }
+  step "r0" {
+    role   = "receiver"
+    action = "recv"
+    expect { flags = ["DATA"] }
+  }
+  step "r1" {
+    role       = "receiver"
+    action     = "recv"
+    depends_on = ["r0"]
+    expect     { flags = ["DATA"] }
+  }
+  step "r2" {
+    role       = "receiver"
+    action     = "recv"
+    depends_on = ["r1"]
+    expect     { flags = ["DATA"] }
+  }
+  step "ack0" {
+    role       = "receiver"
+    action     = "ack"
+    depends_on = ["r0"]
+    segment    { flags = ["ACK"] ack = 1 }
+  }
+  step "ack1" {
+    role       = "receiver"
+    action     = "ack"
+    depends_on = ["r1"]
+    segment    { flags = ["ACK"] ack = 2 }
+  }
+  step "ack2" {
+    role       = "receiver"
+    action     = "ack"
+    depends_on = ["r2"]
+    segment    { flags = ["ACK"] ack = 3 }
+  }
+  step "ra" {
+    role       = "sender"
+    action     = "recv"
+    depends_on = ["w2"]
+    expect     { flags = ["ACK"] }
+  }
+  step "verify" {
+    role       = "sender"
+    action     = "assert"
+    depends_on = ["ra"]
+    assert     { send_count = 3 }
+  }
+}

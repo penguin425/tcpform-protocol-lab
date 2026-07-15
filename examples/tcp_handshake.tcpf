@@ -1,0 +1,46 @@
+# TCP three-way handshake, expressed as composable steps.
+# Within a role, steps run in declaration order; `depends_on` adds cross-role
+# synchronization. Reorder declarations or edit depends_on to "adjust order".
+protocol "tcp_handshake" {
+  description = "TCP three-way handshake: SYN, SYN-ACK, ACK"
+
+  step "syn" {
+    role   = "client"
+    action = "send"
+    segment { flags = ["SYN"] seq = 1000 }
+  }
+
+  step "recv_syn" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["SYN"] }
+  }
+
+  step "syn_ack" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["recv_syn"]
+    segment    { flags = ["SYN", "ACK"] seq = 5000 ack = 1001 }
+  }
+
+  step "recv_syn_ack" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["syn"]
+    expect     { flags = ["SYN", "ACK"] }
+  }
+
+  step "ack" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["recv_syn_ack"]
+    segment    { flags = ["ACK"] ack = 5001 }
+  }
+
+  step "recv_ack" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["syn_ack"]
+    expect     { flags = ["ACK"] }
+  }
+}

@@ -1,0 +1,27 @@
+protocol "custom_header_demo" {
+  description = "Decode a proprietary four-byte application header"
+
+  header_schema "acme" {
+    offset = 0
+    endian = "big"
+    fields = {
+      version = { offset = 0 length = 1 bit_offset = 4 bits = 4 format = "uint" }
+      kind    = { offset = 0 length = 1 bit_offset = 0 bits = 4 format = "uint" }
+      code    = { offset = 1 length = 1 format = "hex" }
+      label   = { offset = 2 length = 2 format = "ascii" }
+    }
+  }
+
+  step "send_custom" {
+    role = "client"
+    action = "send"
+    to = "server"
+    segment { hex = "a10a4142" }
+  }
+  step "receive_custom" {
+    role = "server"
+    action = "recv"
+    depends_on = ["send_custom"]
+    expect { hex = "a10a4142" from = "client" }
+  }
+}

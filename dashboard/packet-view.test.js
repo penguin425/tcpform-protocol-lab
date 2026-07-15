@@ -1,0 +1,10 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { decodePacket, diffHeaders } = require('./packet-view.js');
+const packet = decodePacket('0242ac1e00030242ac1e000208004500001c1234000040110000ac1e0002ac1e0003a028a41000080000');
+assert.equal(packet.ethernet.source, '02:42:ac:1e:00:02');
+assert.equal(packet.ipv4.source, '172.30.0.2');
+assert.equal(packet.ipv4.ttl, 64);
+assert.equal(packet.udp.source_port, 41000);
+assert.deepEqual(diffHeaders({ ipv4: { ttl: 64 } }, { ipv4: { ttl: 63 } }), [{ key: 'ipv4.ttl', expected: 64, actual: 63, changed: true }]);
+console.log('dashboard packet header decode/diff: ok');

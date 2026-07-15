@@ -1,0 +1,64 @@
+# Redis RESP protocol: the client sends a command (here an inline-style GET),
+# the server replies. Then a SET and a PING round trip on the same connection.
+protocol "redis" {
+  description = "Redis command/response over a persistent connection"
+
+  step "open" {
+    role   = "client"
+    action = "open"
+    mode   = "active"
+  }
+  step "get" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["open"]
+    segment    { flags = ["REDIS"] payload = "*2\r\n$3\r\nGET\r\n$3\r\nkey" }
+  }
+  step "rget" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["REDIS"] }
+  }
+  step "get_resp" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rget"]
+    segment    { flags = ["REDIS"] payload = "$5\r\nvalue" }
+  }
+  step "rget_resp" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["get"]
+    expect     { flags = ["REDIS"] }
+  }
+  step "ping" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rget_resp"]
+    segment    { flags = ["REDIS"] payload = "*1\r\n$4\r\nPING" }
+  }
+  step "rping" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["get_resp"]
+    expect     { flags = ["REDIS"] }
+  }
+  step "ping_resp" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rping"]
+    segment    { flags = ["REDIS"] payload = "+PONG" }
+  }
+  step "rping_resp" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["ping"]
+    expect     { flags = ["REDIS"] }
+  }
+  step "verify" {
+    role       = "server"
+    action     = "assert"
+    depends_on = ["ping_resp"]
+    assert     { recv_count = 2 send_count = 2 }
+  }
+}

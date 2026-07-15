@@ -1,0 +1,41 @@
+protocol "conditional_delivery" {
+  description = "Case-driven conditional fault injection"
+
+  step "send" {
+    role   = "client"
+    action = "send"
+    segment { flags = ["DATA"] fields = { path = "/api/items.json" code = 200 } }
+  }
+
+  step "maybe_drop" {
+    role   = "server"
+    action = "drop"
+    when   = "${drop_first}"
+    expect { flags = ["DATA"] }
+    timer { timeout = "20ms" }
+  }
+
+  step "receive" {
+    role   = "server"
+    action = "recv"
+    expect {
+      flags = ["DATA"]
+      fields = {
+        path = { prefix = "/api" }
+        code = { not_equal = 500 }
+      }
+    }
+    timer { timeout = "20ms" }
+  }
+}
+
+cases "conditional_delivery" {
+  case "normal" {
+    vars { drop_first = false }
+    expect = "pass"
+  }
+  case "loss" {
+    vars { drop_first = true }
+    expect = "fail"
+  }
+}

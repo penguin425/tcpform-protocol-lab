@@ -1,0 +1,124 @@
+# Stateful raw TCP exchange over the isolated Docker bridge. The container
+# kernels may generate RST noise for the unbound ports; recv_raw field/flag
+# matching deliberately ignores that noise and validates the crafted flow.
+protocol "docker_raw_tcp" {
+  raw_tcp_stateful = true
+
+  step "client_startup_grace" {
+    role = "client"
+    action = "wait"
+    timer { timeout = "500ms" }
+  }
+
+  step "syn" {
+    role = "client" action = "send_raw" to = "server"
+    ethernet { source = "02:42:ac:1e:00:02" destination = "02:42:ac:1e:00:03" }
+    ipv4 { source = "172.30.0.2" destination = "172.30.0.3" ttl = 31 id = 100 }
+    tcp {
+      source_port = 45000 destination_port = 8080 seq = 1000 flags = ["SYN"]
+      window = 32768
+      options = [{ mss = 1400 }, "nop", { window_scale = 6 }, "sack_permitted"]
+    }
+  }
+
+  step "recv_syn" {
+    role = "server" action = "recv_raw"
+    timer { timeout = "5s" }
+    expect {
+      from = "client" flags = ["SYN"]
+      fields = {
+        "ipv4.source" = "172.30.0.2"
+        "tcp.source_port" = 45000
+        "tcp.destination_port" = 8080
+        "tcp.options_count" = 5
+        "transport.checksum_valid" = true
+      }
+    }
+  }
+
+  step "syn_ack" {
+    role = "server" action = "send_raw" to = "client"
+    ethernet { source = "02:42:ac:1e:00:03" destination = "02:42:ac:1e:00:02" }
+    ipv4 { source = "172.30.0.3" destination = "172.30.0.2" ttl = 33 id = 200 }
+    tcp {
+      source_port = 8080 destination_port = 45000 seq = 7000 ack = 1001
+      flags = ["SYN", "ACK"] window = 16384
+      options = [{ mss = 1400 }, "sack_permitted"]
+    }
+  }
+
+  step "recv_syn_ack" {
+    role = "client" action = "recv_raw" retransmit = 4
+    timer { timeout = "250ms" }
+    expect {
+      from = "server" flags = ["SYN", "ACK"]
+      fields = {
+        "ipv4.source" = "172.30.0.3"
+        "tcp.seq" = 7000
+        "tcp.ack" = 1001
+        "transport.checksum_valid" = true
+      }
+    }
+  }
+
+  step "ack" {
+    role = "client" action = "send_raw" to = "server"
+    ethernet { source = "02:42:ac:1e:00:02" destination = "02:42:ac:1e:00:03" }
+    ipv4 { source = "172.30.0.2" destination = "172.30.0.3" ttl = 31 id = 101 }
+    tcp {
+      source_port = 45000 destination_port = 8080 seq = 1001 ack = 7001
+      flags = ["ACK"] window = 32768
+    }
+  }
+
+  step "recv_ack" {
+    role = "server" action = "recv_raw"
+    timer { timeout = "2s" }
+    expect { from = "client" flags = ["ACK"] fields = { "tcp.ack" = 7001 } }
+  }
+
+  step "request" {
+    role = "client" action = "send_raw" to = "server"
+    ethernet { source = "02:42:ac:1e:00:02" destination = "02:42:ac:1e:00:03" }
+    ipv4 { source = "172.30.0.2" destination = "172.30.0.3" ttl = 31 id = 102 }
+    tcp {
+      source_port = 45000 destination_port = 8080 seq = 1001 ack = 7001
+      flags = ["PSH", "ACK"] window = 32768
+    }
+    segment { payload = "docker-raw-tcp-request" }
+  }
+
+  step "recv_request" {
+    role = "server" action = "recv_raw"
+    timer { timeout = "2s" }
+    expect {
+      from = "client" flags = ["PSH", "ACK"] payload = "docker-raw-tcp-request"
+      fields = { "tcp.seq" = 1001 "tcp.ack" = 7001 "transport.checksum_valid" = true }
+    }
+  }
+
+  step "response" {
+    role = "server" action = "send_raw" to = "client"
+    ethernet { source = "02:42:ac:1e:00:03" destination = "02:42:ac:1e:00:02" }
+    ipv4 { source = "172.30.0.3" destination = "172.30.0.2" ttl = 33 id = 201 }
+    tcp {
+      source_port = 8080 destination_port = 45000 seq = 7001 ack = 1023
+      flags = ["PSH", "ACK"] window = 16384
+    }
+    segment { payload = "docker-raw-tcp-response" }
+  }
+
+  step "recv_response" {
+    role = "client" action = "recv_raw"
+    timer { timeout = "2s" }
+    expect {
+      from = "server" flags = ["PSH", "ACK"] payload = "docker-raw-tcp-response"
+      fields = { "tcp.seq" = 7001 "tcp.ack" = 1023 "transport.checksum_valid" = true }
+    }
+  }
+
+  step "server_capture_grace" {
+    role = "server" action = "wait"
+    timer { timeout = "500ms" }
+  }
+}

@@ -1,0 +1,59 @@
+# SSH transport: version banner exchange, then the key-exchange init
+# (KEXINIT) both ways. Models the first phase of an SSH connection before
+# encrypted mode begins.
+protocol "ssh" {
+  description = "SSH version exchange + KEXINIT"
+
+  step "version_c" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["SSH"] payload = "SSH-2.0-OpenSSH_8.9" }
+  }
+  step "version_s" {
+    role    = "server"
+    action  = "send"
+    segment { flags = ["SSH"] payload = "SSH-2.0-OpenSSH_8.9" }
+  }
+  step "rversion_s" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["version_c"]
+    expect     { flags = ["SSH"] payload = "SSH-2.0-OpenSSH_8.9" }
+  }
+  step "rversion_c" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["version_s"]
+    expect     { flags = ["SSH"] payload = "SSH-2.0-OpenSSH_8.9" }
+  }
+  step "kexinit_c" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rversion_s"]
+    segment    { flags = ["SSH"] payload = "KEXINIT curve25519-sha256" }
+  }
+  step "kexinit_s" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rversion_c"]
+    segment    { flags = ["SSH"] payload = "KEXINIT curve25519-sha256" }
+  }
+  step "rkexinit_s" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["kexinit_c"]
+    expect     { flags = ["SSH"] payload = "KEXINIT curve25519-sha256" }
+  }
+  step "rkexinit_c" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["kexinit_s"]
+    expect     { flags = ["SSH"] payload = "KEXINIT curve25519-sha256" }
+  }
+  step "verify" {
+    role       = "client"
+    action     = "assert"
+    depends_on = ["rkexinit_s"]
+    assert     { send_count = 2 recv_count = 2 }
+  }
+}

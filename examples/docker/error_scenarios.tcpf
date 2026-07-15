@@ -1,0 +1,44 @@
+protocol "error_assertion" {
+  clock = "virtual"
+  description = "Intentional assertion failure"
+  step "set_value" { role="worker" action="set" set { value=1 } }
+  step "check_value" { role="worker" action="assert" assert { value=2 } }
+  step "after_assert" { role="worker" action="log" message="never executed" }
+}
+
+protocol "error_corrupt_mismatch" {
+  clock = "virtual"
+  description = "Corrupted payload does not match receiver expectation"
+  step "corrupt" { role="sender" action="corrupt" to="receiver" segment { hex="deadbeef" flip=0 } }
+  step "receive_original" { role="receiver" action="recv" expect { from="sender" hex="deadbeef" } timer { timeout="20ms" } }
+  step "after_receive" { role="receiver" action="log" message="never executed" }
+}
+
+protocol "error_transport_loss" {
+  clock = "virtual"
+  description = "100 percent transport loss reaches retransmit limit"
+  transport { loss_rate=1.0 seed=42 }
+  step "request" { role="client" action="send" to="server" segment { flags=["REQUEST"] payload="lost" } }
+  step "receive" { role="server" action="recv" retransmit=2 expect { from="client" flags=["REQUEST"] } timer { timeout="20ms" } }
+  step "response" { role="server" action="send" to="client" segment { flags=["RESPONSE"] } }
+}
+
+protocol "error_tcp_state" {
+  clock = "virtual"
+  raw_tcp_stateful = true
+  description = "Invalid TCP state transition: ACK before SYN"
+  step "invalid_ack" {
+    role="client" action="send_raw" to="server"
+    ipv4 { source="192.0.2.1" destination="192.0.2.2" }
+    tcp { source_port=1000 destination_port=80 seq=10 ack=20 flags=["ACK"] }
+  }
+  step "after_ack" { role="server" action="log" message="never executed" }
+}
+
+protocol "error_resource_limit" {
+  clock = "virtual"
+  description = "Payload exceeds configured resource limit"
+  limits { max_payload=4 }
+  step "oversized_send" { role="client" action="send" to="server" segment { payload="too-large" } }
+  step "after_limit" { role="server" action="log" message="never executed" }
+}

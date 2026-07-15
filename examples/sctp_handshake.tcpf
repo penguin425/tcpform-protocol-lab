@@ -1,0 +1,58 @@
+# SCTP four-way handshake: INIT, INIT-ACK, COOKIE-ECHO, COOKIE-ACK. SCTP uses
+# a cookie to prevent SYN-flood-style DoS, requiring an extra round trip.
+protocol "sctp_handshake" {
+  description = "SCTP four-way handshake with cookie"
+
+  step "init" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["INIT"] seq = 1000 payload = "init-tag=1" }
+  }
+  step "rinit" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["INIT"] }
+  }
+  step "init_ack" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rinit"]
+    segment    { flags = ["INIT-ACK"] seq = 5000 payload = "cookie=xyz" }
+  }
+  step "rinit_ack" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["init"]
+    expect     { flags = ["INIT-ACK"] }
+  }
+  step "cookie_echo" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rinit_ack"]
+    segment    { flags = ["COOKIE-ECHO"] payload = "cookie=xyz" }
+  }
+  step "rcookie" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["init_ack"]
+    expect     { flags = ["COOKIE-ECHO"] }
+  }
+  step "cookie_ack" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rcookie"]
+    segment    { flags = ["COOKIE-ACK"] }
+  }
+  step "rcookie_ack" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["cookie_echo"]
+    expect     { flags = ["COOKIE-ACK"] }
+  }
+  step "verify" {
+    role       = "server"
+    action     = "assert"
+    depends_on = ["cookie_ack"]
+    assert     { recv_count = 2 send_count = 2 }
+  }
+}

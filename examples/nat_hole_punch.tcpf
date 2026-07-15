@@ -1,0 +1,67 @@
+# NAT hole punching (UDP): both peers obtain their reflexive addresses via a
+# STUN server (modeled implicitly), then simultaneously send to each other's
+# public endpoints so both NATs open a pinhole, after which data flows.
+# Demonstrates symmetric simultaneous open across two peer roles.
+protocol "nat_hole_punch" {
+  description = "UDP NAT hole punching via simultaneous open"
+
+  # both peers learn their public address from a rendezvous server
+  step "stun_a" {
+    role    = "peer_a"
+    action  = "send"
+    to      = "peer_b"
+    segment { flags = ["UDP"] payload = "punch" }
+  }
+  step "stun_b" {
+    role    = "peer_b"
+    action  = "send"
+    to      = "peer_a"
+    segment { flags = ["UDP"] payload = "punch" }
+  }
+  # each peer receives the other's punch (pinhole now open both ways)
+  step "rpunch_b" {
+    role       = "peer_a"
+    action     = "recv"
+    depends_on = ["stun_a"]
+    expect     { flags = ["UDP"] from = "peer_b" payload = "punch" }
+  }
+  step "rpunch_a" {
+    role       = "peer_b"
+    action     = "recv"
+    depends_on = ["stun_b"]
+    expect     { flags = ["UDP"] from = "peer_a" payload = "punch" }
+  }
+  # now application data flows peer-to-peer
+  step "data_a" {
+    role       = "peer_a"
+    action     = "send"
+    depends_on = ["rpunch_b"]
+    to         = "peer_b"
+    segment    { flags = ["UDP"] payload = "hello from A" }
+  }
+  step "data_b" {
+    role       = "peer_b"
+    action     = "send"
+    depends_on = ["rpunch_a"]
+    to         = "peer_a"
+    segment    { flags = ["UDP"] payload = "hello from B" }
+  }
+  step "rdata_b" {
+    role       = "peer_a"
+    action     = "recv"
+    depends_on = ["data_a"]
+    expect     { flags = ["UDP"] from = "peer_b" payload = "hello from B" }
+  }
+  step "rdata_a" {
+    role       = "peer_b"
+    action     = "recv"
+    depends_on = ["data_b"]
+    expect     { flags = ["UDP"] from = "peer_a" payload = "hello from A" }
+  }
+  step "verify_a" {
+    role       = "peer_a"
+    action     = "assert"
+    depends_on = ["rdata_b"]
+    assert     { send_count = 2 recv_count = 2 }
+  }
+}

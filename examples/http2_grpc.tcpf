@@ -1,0 +1,100 @@
+# HTTP/2 (as used by gRPC): multiplexed streams over one connection. Two
+# streams (id 1 and 3) are interleaved — the client sends HEADERS+DATA on
+# each, and the server interleaves its responses. Demonstrates the `stream`
+# segment attribute for multiplexing.
+protocol "http2_grpc" {
+  description = "HTTP/2 multiplexed streams (gRPC-style)"
+
+  step "preface" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["PREFACE"] }
+  }
+  step "rpreface" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["PREFACE"] }
+  }
+  # stream 1: HEADERS + DATA
+  step "s1_headers" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["preface"]
+    segment    { flags = ["HEADERS"] stream = 1 payload = ":path=/greet" }
+  }
+  step "s1_data" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["s1_headers"]
+    segment    { flags = ["DATA"] stream = 1 payload = "Hi" }
+  }
+  # stream 3: HEADERS + DATA (interleaved)
+  step "s3_headers" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["s1_data"]
+    segment    { flags = ["HEADERS"] stream = 3 payload = ":path=/status" }
+  }
+  step "s3_data" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["s3_headers"]
+    segment    { flags = ["DATA"] stream = 3 payload = "?" }
+  }
+  # server handles stream 1
+  step "r_s1h" {
+    role   = "server"
+    action = "recv"
+    expect { flags = ["HEADERS"] stream = 1 }
+  }
+  step "r_s1d" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["r_s1h"]
+    expect     { flags = ["DATA"] stream = 1 }
+  }
+  step "s1_resp" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["r_s1d"]
+    segment    { flags = ["HEADERS"] stream = 1 payload = ":status=200" }
+  }
+  # server handles stream 3
+  step "r_s3h" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["r_s1h"]
+    expect     { flags = ["HEADERS"] stream = 3 }
+  }
+  step "r_s3d" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["r_s3h"]
+    expect     { flags = ["DATA"] stream = 3 }
+  }
+  step "s3_resp" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["r_s3d"]
+    segment    { flags = ["HEADERS"] stream = 3 payload = ":status=200" }
+  }
+  # client receives both responses
+  step "r_s1resp" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["s1_data"]
+    expect     { flags = ["HEADERS"] stream = 1 }
+  }
+  step "r_s3resp" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["s3_data"]
+    expect     { flags = ["HEADERS"] stream = 3 }
+  }
+  step "verify" {
+    role       = "client"
+    action     = "assert"
+    depends_on = ["r_s3resp"]
+    assert     { send_count = 5 recv_count = 2 }
+  }
+}

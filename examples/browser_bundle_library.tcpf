@@ -1,0 +1,4 @@
+protocol "browser_import_demo" {
+  step "send" { role="client" action="send" to="server" segment { hex="deadbeef" } }
+  step "recv" { role="server" action="recv" depends_on=["send"] expect { hex="deadbeef" from="client" } }
+}

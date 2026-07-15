@@ -1,0 +1,91 @@
+# BGP session establishment: both peers OPEN, exchange KEEPALIVEs to confirm,
+# then the server advertises a prefix via UPDATE, the client acknowledges with
+# a KEEPALIVE, and the session stays up with periodic keepalives.
+protocol "bgp" {
+  description = "BGP: open, keepalive, update, keepalive"
+
+  step "open_a" {
+    role    = "peer_a"
+    action  = "send"
+    segment { flags = ["BGP"] payload = "OPEN as=65001 hold=180" }
+  }
+  step "open_b" {
+    role    = "peer_b"
+    action  = "send"
+    segment { flags = ["BGP"] payload = "OPEN as=65002 hold=180" }
+  }
+  step "ropen_b" {
+    role       = "peer_a"
+    action     = "recv"
+    depends_on = ["open_a"]
+    expect     { flags = ["BGP"] payload = "OPEN as=65002 hold=180" }
+  }
+  step "ropen_a" {
+    role       = "peer_b"
+    action     = "recv"
+    depends_on = ["open_b"]
+    expect     { flags = ["BGP"] payload = "OPEN as=65001 hold=180" }
+  }
+  step "keepalive_a" {
+    role       = "peer_a"
+    action     = "send"
+    depends_on = ["ropen_b"]
+    segment    { flags = ["BGP"] payload = "KEEPALIVE" }
+  }
+  step "keepalive_b" {
+    role       = "peer_b"
+    action     = "send"
+    depends_on = ["ropen_a"]
+    segment    { flags = ["BGP"] payload = "KEEPALIVE" }
+  }
+  step "rkeepalive_b" {
+    role       = "peer_a"
+    action     = "recv"
+    depends_on = ["keepalive_a"]
+    expect     { flags = ["BGP"] payload = "KEEPALIVE" }
+  }
+  step "rkeepalive_a" {
+    role       = "peer_b"
+    action     = "recv"
+    depends_on = ["keepalive_b"]
+    expect     { flags = ["BGP"] payload = "KEEPALIVE" }
+  }
+  # peer_b advertises a prefix
+  step "update" {
+    role       = "peer_b"
+    action     = "send"
+    depends_on = ["rkeepalive_a"]
+    segment    { flags = ["BGP"] payload = "UPDATE nlri=10.0.0.0/8 next-hop=198.51.100.1" }
+  }
+  step "rupdate" {
+    role       = "peer_a"
+    action     = "recv"
+    depends_on = ["rkeepalive_b"]
+    expect     { flags = ["BGP"] }
+  }
+  # keepalive acknowledges the update
+  step "ack_keepalive" {
+    role       = "peer_a"
+    action     = "send"
+    depends_on = ["rupdate"]
+    segment    { flags = ["BGP"] payload = "KEEPALIVE" }
+  }
+  step "rack_keepalive" {
+    role       = "peer_b"
+    action     = "recv"
+    depends_on = ["update"]
+    expect     { flags = ["BGP"] payload = "KEEPALIVE" }
+  }
+  step "verify_a" {
+    role       = "peer_a"
+    action     = "assert"
+    depends_on = ["ack_keepalive"]
+    assert     { recv_count = 3 send_count = 3 }
+  }
+  step "verify_b" {
+    role       = "peer_b"
+    action     = "assert"
+    depends_on = ["rack_keepalive"]
+    assert     { send_count = 3 }
+  }
+}

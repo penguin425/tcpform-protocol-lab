@@ -1,0 +1,167 @@
+# SMTP mail submission: EHLO, MAIL FROM, RCPT TO, DATA (message body),
+# QUIT. The server responds with status codes after each command.
+protocol "smtp" {
+  description = "SMTP mail submission: EHLO, MAIL, RCPT, DATA, QUIT"
+
+  step "open" {
+    role   = "client"
+    action = "open"
+    mode   = "active"
+  }
+  step "greeting" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["open"]
+    segment    { flags = ["SMTP"] payload = "220 mail.example.com ESMTP" }
+  }
+  step "rgreeting" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["open"]
+    expect     { flags = ["SMTP"] }
+  }
+  step "ehlo" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rgreeting"]
+    segment    { flags = ["SMTP"] payload = "EHLO client.local" }
+  }
+  step "rehlo" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["greeting"]
+    expect     { flags = ["SMTP"] }
+  }
+  step "ehlo_ok" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rehlo"]
+    segment    { flags = ["SMTP"] payload = "250-mail.example.com" }
+  }
+  step "rehlo_ok" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["ehlo"]
+    expect     { flags = ["SMTP"] }
+  }
+  step "mail" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rehlo_ok"]
+    segment    { flags = ["SMTP"] payload = "MAIL FROM:<a@x.com>" }
+  }
+  step "rmail" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["ehlo_ok"]
+    expect     { flags = ["SMTP"] }
+  }
+  step "mail_ok" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rmail"]
+    segment    { flags = ["SMTP"] payload = "250 OK" }
+  }
+  step "rmail_ok" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["mail"]
+    expect     { flags = ["SMTP"] }
+  }
+  step "rcpt" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rmail_ok"]
+    segment    { flags = ["SMTP"] payload = "RCPT TO:<b@y.com>" }
+  }
+  step "rrcpt" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["mail_ok"]
+    expect     { flags = ["SMTP"] }
+  }
+  step "rcpt_ok" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rrcpt"]
+    segment    { flags = ["SMTP"] payload = "250 OK" }
+  }
+  step "rrcpt_ok" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["rcpt"]
+    expect     { flags = ["SMTP"] }
+  }
+  step "data" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rrcpt_ok"]
+    segment    { flags = ["SMTP"] payload = "DATA" }
+  }
+  step "rdata" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["rcpt_ok"]
+    expect     { flags = ["SMTP"] }
+  }
+  step "data_go" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rdata"]
+    segment    { flags = ["SMTP"] payload = "354 End data with <CRLF>.<CRLF>" }
+  }
+  step "rdata_go" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["data"]
+    expect     { flags = ["SMTP"] }
+  }
+  step "body" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rdata_go"]
+    segment    { flags = ["SMTP"] payload = "Subject: Hi\r\n\r\nHello.\r\n." }
+  }
+  step "rbody" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["data_go"]
+    expect     { flags = ["SMTP"] }
+  }
+  step "body_ok" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rbody"]
+    segment    { flags = ["SMTP"] payload = "250 OK queued" }
+  }
+  step "rbody_ok" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["body"]
+    expect     { flags = ["SMTP"] }
+  }
+  step "quit" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["rbody_ok"]
+    segment    { flags = ["SMTP"] payload = "QUIT" }
+  }
+  step "rquit" {
+    role       = "server"
+    action     = "recv"
+    depends_on = ["body_ok"]
+    expect     { flags = ["SMTP"] }
+  }
+  step "bye" {
+    role       = "server"
+    action     = "send"
+    depends_on = ["rquit"]
+    segment    { flags = ["SMTP"] payload = "221 Bye" }
+  }
+  step "rbye" {
+    role       = "client"
+    action     = "recv"
+    depends_on = ["quit"]
+    expect     { flags = ["SMTP"] }
+  }
+}

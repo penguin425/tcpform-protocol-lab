@@ -1,0 +1,48 @@
+# TCP data transfer with cumulative acknowledgements and a sliding window.
+# Client sends 3 data segments; the server ACKs each, advancing the cumulative
+# ack number. Demonstrates auto-advancing seq numbers and the `ack` action.
+protocol "tcp_data_transfer" {
+  description = "TCP data transfer: 3 segments, cumulative ACKs"
+
+  step "d1" {
+    role    = "client"
+    action  = "send"
+    segment { flags = ["PSH", "ACK"] seq = 1001 payload = "aaaa" payload_len = 4 }
+  }
+  step "a1" {
+    role       = "server"
+    action     = "ack"
+    expect     { flags = ["PSH"] }
+    segment    { flags = ["ACK"] ack = 1005 }
+  }
+  step "d2" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["a1"]
+    segment    { flags = ["PSH", "ACK"] payload = "bbbb" payload_len = 4 }
+  }
+  step "a2" {
+    role       = "server"
+    action     = "ack"
+    expect     { flags = ["PSH"] }
+    segment    { flags = ["ACK"] ack = 1009 }
+  }
+  step "d3" {
+    role       = "client"
+    action     = "send"
+    depends_on = ["a2"]
+    segment    { flags = ["PSH", "ACK"] payload = "cccc" payload_len = 4 }
+  }
+  step "a3" {
+    role       = "server"
+    action     = "ack"
+    expect     { flags = ["PSH"] }
+    segment    { flags = ["ACK"] ack = 1013 }
+  }
+  step "verify" {
+    role       = "client"
+    action     = "assert"
+    depends_on = ["d3"]
+    assert     { send_count = 3 }
+  }
+}
