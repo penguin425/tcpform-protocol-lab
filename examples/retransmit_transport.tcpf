@@ -2,7 +2,6 @@
 # A small transport-level delay is applied to every delivered segment.
 protocol "retransmit_transport" {
   description = "Automatic retransmission with transport latency"
-  clock       = "virtual"
 
   transport {
     delay     = "5ms"
@@ -22,21 +21,21 @@ protocol "retransmit_transport" {
     action     = "recv"
     retransmit = 1
     expect { flags = ["RESPONSE"] }
-    timer { timeout = "50ms" }
+    timer { timeout = "500ms" }
   }
 
   step "drop_first_request" {
     role   = "server"
     action = "drop"
     expect { flags = ["REQUEST"] }
-    timer { timeout = "100ms" }
+    timer { timeout = "1000ms" }
   }
 
   step "recv_retry" {
     role   = "server"
     action = "recv"
     expect { flags = ["REQUEST"] }
-    timer { timeout = "100ms" }
+    timer { timeout = "1000ms" }
   }
 
   step "response" {
