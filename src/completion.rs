@@ -21,7 +21,7 @@ const BASH: &str = r#"_tcpform() {
   commands="validate list plan visualize serve fmt migrate init template schema snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore generate-faults plugin tls-audit differential platform run test doctor completion import-pcap help"
   case "$prev" in
     completion) COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") ); return ;;
-    template) COMPREPLY=( $(compgen -W "list show" -- "$cur") ); return ;;
+    template) COMPREPLY=( $(compgen -W "list show search add" -- "$cur") ); return ;;
     --template) COMPREPLY=( $(compgen -W "tcp-handshake dns http websocket tls" -- "$cur") ); return ;;
     --output|--config|--markdown|--json|--junit|--pcap|--pcapng|--baseline|--auth-config|--cert|--ca) COMPREPLY=( $(compgen -f -- "$cur") ); return ;;
   esac
@@ -60,7 +60,7 @@ _tcpform() {
   fi
   case $words[2] in
     completion) _values 'shell' bash zsh ;;
-    template) _values 'template command' list show ;;
+    template) _values 'template command' list show search add ;;
     init) _arguments '1:directory:_files -/' '--name[project name]:name' '--template[protocol template]:template:($templates)' '--force[overwrite generated files]' ;;
     doctor) _arguments '1:project directory:_files -/' '--json[emit JSON report]' ;;
     *) _arguments '*:file:_files' '--json[emit JSON]' '--output[output path]:path:_files' '--help[show help]' ;;

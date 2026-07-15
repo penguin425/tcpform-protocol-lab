@@ -139,6 +139,18 @@ pub fn init_project(
     template: &str,
     force: bool,
 ) -> Result<Vec<PathBuf>, String> {
+    let protocol_name = project_name.replace('-', "_");
+    let source = render_template(template, &protocol_name)?;
+    init_project_with_source(directory, project_name, template, &source, force)
+}
+
+pub fn init_project_with_source(
+    directory: &Path,
+    project_name: &str,
+    template: &str,
+    template_source: &str,
+    force: bool,
+) -> Result<Vec<PathBuf>, String> {
     validate_name(project_name)?;
     if directory.exists()
         && !force
@@ -153,7 +165,11 @@ pub fn init_project(
         ));
     }
     let protocol_name = project_name.replace('-', "_");
-    let source = render_template(template, &protocol_name)?;
+    let source = template_source.replace("{{name}}", &protocol_name);
+    let blocks = crate::parse_file(&source)
+        .map_err(|error| format!("template `{template}` contains invalid DSL: {error}"))?;
+    crate::model::interpret(&blocks)
+        .map_err(|error| format!("template `{template}` contains invalid protocol DSL: {error}"))?;
     let files = [
         (PathBuf::from("protocol.tcpf"), source),
         (PathBuf::from(".tcpformfmt.json"), "{\n  \"indent_width\": 2,\n  \"align_attributes\": false,\n  \"preserve_inline_blocks\": true\n}\n".to_string()),
