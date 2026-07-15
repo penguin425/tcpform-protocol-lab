@@ -6,6 +6,11 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Replaced third-party product and configuration-language comparisons with
+  vendor-neutral descriptions of tcpform's declarative, block-oriented DSL.
+
 ## [0.4.0] - 2026-07-15
 
 ### Changed

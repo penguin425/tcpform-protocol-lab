@@ -1,4 +1,4 @@
-//! Generic HCL-like block tree. The parser produces `Vec<Block>` (top-level
+//! Generic block-oriented syntax tree. The parser produces `Vec<Block>` (top-level
 //! blocks of a file). The model layer interprets `protocol` blocks.
 
 use crate::value::Value;

@@ -1,6 +1,6 @@
 //! tcpform — declaratively compose protocol primitives
 //! (send/recv/send_raw/recv_raw/ack/nack/open/close/reset/wait/drop/duplicate/assert/set/log)
-//! into new protocols using a Terraform-style DSL, then simulate them.
+//! into new protocols using a declarative protocol DSL, then simulate them.
 //!
 //! ```text
 //! // A .tcpf file describes a protocol as ordered, composable steps.
