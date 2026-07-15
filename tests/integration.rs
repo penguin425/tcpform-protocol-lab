@@ -2579,6 +2579,23 @@ fn docker_raw_lab_scenario_runs_and_container_policy_is_hardened() {
     assert!(dockerfile.contains("--uid 10001"));
     assert!(dockerfile.contains("USER tcpform:tcpform"));
     assert!(dockerfile.contains("cargo build --locked --release"));
+    for asset in [
+        "order.js",
+        "flow.js",
+        "packet-view.js",
+        "analysis-tools.js",
+        "advanced-tools.js",
+        "workbench-tools.js",
+        "workbench-worker.js",
+        "platform-ui.js",
+    ] {
+        assert!(
+            dockerfile.contains(&format!(
+                "COPY dashboard/{asset} /usr/share/nginx/html/{asset}"
+            )),
+            "dashboard image is missing {asset}"
+        );
+    }
     assert!(dockerfile.contains(
         "FROM nginx:1.31.2-alpine3.23-slim@sha256:dd722b8ee8794f3c273bfaf8b5351b0652a68ccd73c17e5f0d029857a58f25ef AS dashboard"
     ));

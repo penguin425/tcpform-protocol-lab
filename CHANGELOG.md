@@ -6,6 +6,11 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Include `platform-ui.js` in the dashboard image so initialization can load
+  sample manifests instead of stalling.
+
 ## [0.5.1] - 2026-07-15
 
 ### Changed
