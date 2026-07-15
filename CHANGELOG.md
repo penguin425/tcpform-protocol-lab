@@ -8,6 +8,8 @@ All notable changes to tcpform are documented here. The format follows
 
 ### Added
 
+- External template registry search, pinned Git retrieval, trusted-owner policy,
+  SHA256 and Ed25519 verification, deterministic caching, and lock files.
 - Git-friendly local snapshot creation, checking, and explicit updates with
   packet, header, state-machine, result, latency, and Visualizer data.
 - `tcpform import-pcap` generation of starter DSL and smoke cases from classic

@@ -66,6 +66,8 @@ them with `tcpform ci-report base.json current.json --markdown report.md`.
 tcpform validate <file>                # parse + validate every protocol
 tcpform init demo --template websocket # scaffold a protocol project and CI
 tcpform template list                  # list built-in protocol templates
+tcpform template search mqtt           # search the configured external registry
+tcpform template add owner/mqtt        # verify, cache, and lock an external template
 tcpform schema dsl                     # print the machine-readable DSL schema
 tcpform snapshot protocol.tcpf         # create/check protocol.tcpf.snapshot.json
 tcpform snapshot --check protocol.tcpf # fail when behavior differs from Git
@@ -140,6 +142,38 @@ CI. Running without a mode creates a missing snapshot and checks an existing
 one; `--update` explicitly replaces it. Runtime latency has a 1000 µs default
 tolerance, configurable with `--latency-tolerance-us`, while protocol structure
 and packet data are compared exactly. Use `--output` to choose another path.
+
+External templates use `.tcpform/template-registry.json` as an explicit trust
+policy. Each entry names a trusted owner, semantic version, full 40-character
+Git commit, repository path, template path, SHA256, Ed25519 signature, and
+public key. For example:
+
+```json
+{
+  "schema_version": "1.0",
+  "trusted_owners": ["owner"],
+  "templates": [{
+    "name": "owner/mqtt",
+    "version": "1.0.0",
+    "repository": "https://github.com/owner/mqtt.git",
+    "revision": "0123456789abcdef0123456789abcdef01234567",
+    "path": "tcpform/template.tcpf",
+    "sha256": "<64 hexadecimal characters>",
+    "signature_hex": "<Ed25519 signature over the exact template bytes>",
+    "public_key_hex": "<Ed25519 public key>"
+  }]
+}
+```
+
+Run `tcpform template search mqtt`, then `tcpform template add owner/mqtt`.
+The add command clones only for verification, checks out the pinned commit,
+verifies the digest and signature, caches the exact bytes, and writes
+`.tcpform/templates.lock.json`. Afterwards,
+`tcpform init broker-test --template owner/mqtt` works from the verified cache.
+Commit the registry, lock file, and `.tcpform/templates/` cache so CI and other
+contributors use the same reviewed bytes without a mutable network lookup.
+Changing the registry is a trust-policy change and should receive code-owner
+review. Use `--registry <file>` for a non-default index.
 
 The formatter discovers `.tcpformfmt.json` or accepts an explicit `--config`.
 Supported keys are `indent_width`, `align_attributes`, and

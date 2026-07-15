@@ -136,6 +136,35 @@ fn snapshot_cli_creates_checks_rejects_changes_and_updates() {
 }
 
 #[test]
+fn template_search_cli_reads_the_configured_registry() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("tcpform-template-search-{unique}"));
+    std::fs::create_dir_all(dir.join(".tcpform")).unwrap();
+    std::fs::write(
+        dir.join(".tcpform/template-registry.json"),
+        r#"{"schema_version":"1.0","trusted_owners":["owner"],"templates":[{"name":"owner/mqtt","version":"1.0.0","repository":"https://example.invalid/repo.git","revision":"0123456789abcdef0123456789abcdef01234567","path":"template.tcpf","sha256":"0000000000000000000000000000000000000000000000000000000000000000","signature_hex":"","public_key_hex":""}]}"#,
+    )
+    .unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tcpform"))
+        .args(["template", "search", "mqtt"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8(output.stdout)
+        .unwrap()
+        .contains("owner/mqtt"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn handshake_runs_to_completion() {
     let src = include_str!("../examples/tcp_handshake.tcpf");
     let p = load_protocol(src, "tcp_handshake");

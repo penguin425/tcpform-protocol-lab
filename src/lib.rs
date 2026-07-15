@@ -55,6 +55,7 @@ pub mod primitives;
 pub mod raw_socket;
 pub mod snapshot;
 pub mod storage;
+pub mod template_registry;
 pub mod templates;
 pub mod tls_audit;
 pub mod tooling;

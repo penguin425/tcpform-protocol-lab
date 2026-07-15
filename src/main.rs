@@ -85,7 +85,7 @@ fn usage() {
          tcpform fmt [--check|--write] [--stdin] [--config <file>] [--indent <n>] [--align] [--expand-inline] <file...>\n  \
          tcpform migrate [--check|--write] <file>\n  \
          tcpform init [directory] [--name <name>] [--template <name>] [--force]\n  \
-         tcpform template <list|show <name>>\n  \
+         tcpform template <list|show <name>|search <query>|add <owner/name>> [--registry <file>]\n  \
          tcpform schema dsl [--output <file>]\n  \
          tcpform snapshot [--check|--update] [--output <file>] [--latency-tolerance-us <n>] <source> [protocol]\n  \
          tcpform ci-snapshot --output <file> <source> [protocol]\n  \
@@ -441,8 +441,14 @@ fn cmd_init(args: &[String]) -> Result<(), String> {
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("tcpform-project");
-    let written =
-        tcpform::templates::init_project(path, name.unwrap_or(inferred), template, force)?;
+    let project_name = name.unwrap_or(inferred);
+    let written = if template.contains('/') {
+        let root = env::current_dir().map_err(|error| error.to_string())?;
+        let source = tcpform::template_registry::load_locked(&root, template)?;
+        tcpform::templates::init_project_with_source(path, project_name, template, &source, force)?
+    } else {
+        tcpform::templates::init_project(path, project_name, template, force)?
+    };
     for path in written {
         println!("created {}", path.display());
     }
@@ -462,8 +468,45 @@ fn cmd_template(args: &[String]) -> Result<(), String> {
             print!("{}", tcpform::templates::render_template(name, name)?);
             Ok(())
         }
-        _ => Err("usage: tcpform template <list|show <name>>".into()),
+        Some("search") => {
+            let query = args.get(1).ok_or("template search <query> [--registry <file>]")?;
+            let root = env::current_dir().map_err(|error| error.to_string())?;
+            let registry_path = template_registry_path(args, &root)?;
+            let registry = tcpform::template_registry::read_registry(&registry_path)?;
+            for entry in tcpform::template_registry::search(&registry, query) {
+                println!("{:<28} {:<12} {}", entry.name, entry.version, entry.revision);
+            }
+            Ok(())
+        }
+        Some("add") => {
+            let name = args.get(1).ok_or("template add <owner/name> [--registry <file>]")?;
+            let root = env::current_dir().map_err(|error| error.to_string())?;
+            let registry_path = template_registry_path(args, &root)?;
+            let locked = tcpform::template_registry::add(&root, &registry_path, name)?;
+            println!(
+                "locked {} {} at {} ({})",
+                locked.entry.name, locked.entry.version, locked.entry.revision, locked.entry.sha256
+            );
+            Ok(())
+        }
+        _ => Err("usage: tcpform template <list|show <name>|search <query>|add <owner/name>> [--registry <file>]".into()),
     }
+}
+
+fn template_registry_path(
+    args: &[String],
+    root: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    let path = if let Some(index) = args.iter().position(|arg| arg == "--registry") {
+        std::path::PathBuf::from(args.get(index + 1).ok_or("--registry requires a file")?)
+    } else {
+        std::path::PathBuf::from(tcpform::template_registry::DEFAULT_REGISTRY)
+    };
+    Ok(if path.is_absolute() {
+        path
+    } else {
+        root.join(path)
+    })
 }
 
 fn cmd_schema(args: &[String]) -> Result<(), String> {
