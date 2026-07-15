@@ -17,6 +17,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Verify annotated tag signature
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME")"
+          object_type="$(jq -r '.object.type' <<<"$tag_object")"
+          object_sha="$(jq -r '.object.sha' <<<"$tag_object")"
+          if [ "$object_type" != "tag" ]; then
+            echo "$GITHUB_REF_NAME must be an annotated, signed tag" >&2
+            exit 1
+          fi
+          verification="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha")"
+          verified="$(jq -r '.verification.verified' <<<"$verification")"
+          reason="$(jq -r '.verification.reason' <<<"$verification")"
+          if [ "$verified" != "true" ]; then
+            echo "$GITHUB_REF_NAME signature verification failed: $reason" >&2
+            exit 1
+          fi
       - name: Verify tag matches Cargo package version
         shell: bash
         run: |
