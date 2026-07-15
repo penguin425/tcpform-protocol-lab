@@ -72,6 +72,7 @@ tcpform ci-report base.json result.json --markdown report.md
 tcpform doctor [--json] [project-directory] # diagnose host and project setup
 tcpform completion bash               # generate Bash completion
 tcpform completion zsh                # generate Zsh completion
+tcpform import-pcap capture.pcapng --protocol captured --output captured.tcpf
 tcpform list <file>                    # list protocols, steps, roles
 tcpform plan   <file> <protocol>       # show the resolved topological order
 tcpform run    <file> <protocol>       # simulate and print the event timeline
@@ -122,6 +123,12 @@ tcpform completion bash > ~/.local/share/bash-completion/completions/tcpform
 # Zsh (ensure ~/.zfunc is in fpath)
 tcpform completion zsh > ~/.zfunc/_tcpform
 ```
+
+`tcpform import-pcap` accepts classic PCAP and PCAPNG captures with Ethernet or
+raw-IP link types. It groups IPv4/IPv6 TCP and UDP packets into sessions and
+generates roles, endpoint/header comments, timing delays, payload hex,
+send/receive steps, and a smoke case. Treat generated DSL as a reviewable
+starting point: captures may contain credentials or other sensitive payloads.
 
 The formatter discovers `.tcpformfmt.json` or accepts an explicit `--config`.
 Supported keys are `indent_width`, `align_attributes`, and

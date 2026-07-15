@@ -43,6 +43,7 @@ fn main() {
         "ci-report" => cmd_ci_report(&args[2..]),
         "doctor" => cmd_doctor(&args[2..]),
         "completion" => cmd_completion(&args[2..]),
+        "import-pcap" => cmd_import_pcap(&args[2..]),
         "lsp" => cmd_lsp(),
         "gate" => cmd_gate(&args[2..]),
         "bundle" => cmd_bundle(&args[2..]),
@@ -89,6 +90,7 @@ fn usage() {
          tcpform ci-report <baseline.json> <current.json> [--markdown <file>] [--json <file>] [--fail-on-regression]\n  \
          tcpform doctor [--json] [project-directory]\n  \
          tcpform completion <bash|zsh>\n  \
+         tcpform import-pcap <capture.pcap|capture.pcapng> --protocol <name> --output <file>\n  \
          tcpform lsp\n  \
          tcpform gate <metrics.json> [--config <file>] [--profile <name>] [--baseline <file>] [--repeat <n>] [--markdown <file>] [--junit <file>] [--github]\n  \
          tcpform bundle --output <file> [--capture <file>] <source> <protocol>\n  \
@@ -612,6 +614,43 @@ fn cmd_completion(args: &[String]) -> Result<(), String> {
         return Err("usage: tcpform completion <bash|zsh>".into());
     }
     print!("{}", tcpform::completion::generate(&args[0])?);
+    Ok(())
+}
+
+fn cmd_import_pcap(args: &[String]) -> Result<(), String> {
+    let mut input = None;
+    let mut protocol = None;
+    let mut output = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--protocol" => {
+                index += 1;
+                protocol = Some(
+                    args.get(index)
+                        .ok_or("--protocol requires a name")?
+                        .as_str(),
+                );
+            }
+            "--output" => {
+                index += 1;
+                output = Some(args.get(index).ok_or("--output requires a file")?.as_str());
+            }
+            value if value.starts_with('-') => {
+                return Err(format!("unknown import-pcap option `{value}`"));
+            }
+            value if input.is_none() => input = Some(value),
+            _ => return Err("import-pcap accepts one capture file".into()),
+        }
+        index += 1;
+    }
+    let input = input.ok_or("import-pcap requires a capture file")?;
+    let protocol = protocol.ok_or("import-pcap requires --protocol <name>")?;
+    let output = output.ok_or("import-pcap requires --output <file>")?;
+    let bytes = fs::read(input).map_err(|error| format!("cannot read `{input}`: {error}"))?;
+    let source = tcpform::pcap_import::import_capture(&bytes, protocol)?;
+    fs::write(output, source).map_err(|error| format!("cannot write `{output}`: {error}"))?;
+    println!("generated {output}");
     Ok(())
 }
 
