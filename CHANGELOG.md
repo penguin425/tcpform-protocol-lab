@@ -6,10 +6,14 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-15
+
 ### Changed
 
 - Raised the minimum supported Rust version from 1.88 to 1.97 and updated the
   digest-pinned Docker builder image accordingly.
+- Updated `rusqlite` from 0.39.0 to 0.40.1 and the release artifact download
+  action from v7 to v8.
 
 ## [0.3.1] - 2026-07-15
 
