@@ -14,10 +14,21 @@ in-memory or real TCP/UDP transport, printing a trace of every segment exchanged
 
 ## Build & run
 
+Prebuilt archives for Linux, macOS, and Windows are attached to each
+[GitHub Release](https://github.com/penguin425/tcpform-protocol-lab/releases).
+Verify a downloaded archive against `SHA256SUMS` before extracting it.
+
 ```sh
 cargo build --release
 ./target/release/tcpform <command> ...
 ```
+
+Maintainers create a release by updating the package version in `Cargo.toml`
+and `Cargo.lock`, merging that change, and pushing a matching signed tag such
+as `v0.1.2`. The release workflow builds native archives, publishes checksums,
+and creates or updates the GitHub Release. To additionally publish to crates.io,
+set the repository variable `PUBLISH_CRATE` to `true` and add the
+`CARGO_REGISTRY_TOKEN` Actions secret.
 
 ## CLI
 
