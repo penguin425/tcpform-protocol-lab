@@ -2,6 +2,7 @@
 # A small transport-level delay is applied to every delivered segment.
 protocol "retransmit_transport" {
   description = "Automatic retransmission with transport latency"
+  clock       = "virtual"
 
   transport {
     delay     = "5ms"
