@@ -2533,6 +2533,7 @@ fn docker_raw_lab_scenario_runs_and_container_policy_is_hardened() {
         "--drop-gid",
         "--json-file",
         "target: dashboard",
+        "user: \"0:0\"",
     ] {
         assert!(
             compose.contains(required),
@@ -2542,9 +2543,41 @@ fn docker_raw_lab_scenario_runs_and_container_policy_is_hardened() {
     assert!(!compose.contains("privileged:"));
     assert!(!compose.contains("network_mode: host"));
 
+    let published = std::fs::read_to_string("compose.published.yml").unwrap();
+    for required in [
+        "ghcr.io/penguin425/tcpform:latest",
+        "ghcr.io/penguin425/tcpform-dashboard:latest",
+        "user: \"0:0\"",
+        "cap_drop: [ALL]",
+        "cap_add: [NET_RAW, SETUID, SETGID]",
+        "internal: true",
+    ] {
+        assert!(
+            published.contains(required),
+            "missing published Compose policy: {required}"
+        );
+    }
+
+    let container_release =
+        std::fs::read_to_string(".github/workflows/container-release.yml").unwrap();
+    for required in [
+        "target: runtime",
+        "target: dashboard",
+        "platforms: linux/amd64,linux/arm64",
+        "sbom: true",
+        "provenance: mode=max",
+        "cosign sign --yes",
+        "DOCKERHUB_ENABLED",
+    ] {
+        assert!(
+            container_release.contains(required),
+            "missing container release policy: {required}"
+        );
+    }
+
     let dockerfile = std::fs::read_to_string("Dockerfile").unwrap();
     assert!(dockerfile.contains("--uid 10001"));
-    assert!(dockerfile.contains("USER 0:0"));
+    assert!(dockerfile.contains("USER tcpform:tcpform"));
     assert!(dockerfile.contains("cargo build --locked --release"));
     assert!(dockerfile.contains(
         "FROM nginx:1.31.2-alpine3.23-slim@sha256:dd722b8ee8794f3c273bfaf8b5351b0652a68ccd73c17e5f0d029857a58f25ef AS dashboard"

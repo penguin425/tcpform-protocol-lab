@@ -18,6 +18,20 @@ Prebuilt archives for Linux, macOS, and Windows are attached to each
 [GitHub Release](https://github.com/penguin425/tcpform-protocol-lab/releases).
 Verify a downloaded archive against `SHA256SUMS` before extracting it.
 
+Release containers are published separately for the CLI and Visualizer:
+
+```sh
+docker pull ghcr.io/penguin425/tcpform:latest
+docker pull ghcr.io/penguin425/tcpform-dashboard:latest
+docker run --rm ghcr.io/penguin425/tcpform:latest \
+  list /scenarios/raw_docker_udp.tcpf
+```
+
+The CLI image runs as UID/GID 10001 by default. Raw packet access is available
+through [`compose.published.yml`](compose.published.yml), which explicitly
+starts as root with only `NET_RAW`, `SETUID`, and `SETGID`, then instructs
+tcpform to drop permanently to UID/GID 10001 before executing the scenario.
+
 ```sh
 cargo build --release
 ./target/release/tcpform <command> ...
@@ -531,6 +545,19 @@ Security properties of the lab:
 Docker Engine with the Compose v2 plugin is required. The `docker-raw` CI job
 runs the visual lab, probes its HTML/JSON endpoints, and uploads traces and
 captures for diagnosis.
+
+After container packages have been published for a release, run the same lab
+without compiling Rust locally:
+
+```sh
+docker compose -f compose.published.yml --profile visual up
+```
+
+Maintainers publish `linux/amd64` and `linux/arm64` images to GHCR from signed
+release tags. The images include SBOM and provenance attestations and are
+signed with Sigstore keyless signing. If the `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN` repository secrets are configured, the workflow mirrors the
+same tags to the `tcpform` and `tcpform-dashboard` Docker Hub repositories.
 
 ### Visual Docker communication monitor
 
