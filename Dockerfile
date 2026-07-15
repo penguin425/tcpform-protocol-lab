@@ -28,5 +28,6 @@ COPY dashboard/analysis-tools.js /usr/share/nginx/html/analysis-tools.js
 COPY dashboard/advanced-tools.js /usr/share/nginx/html/advanced-tools.js
 COPY dashboard/workbench-tools.js /usr/share/nginx/html/workbench-tools.js
 COPY dashboard/workbench-worker.js /usr/share/nginx/html/workbench-worker.js
+COPY dashboard/platform-ui.js /usr/share/nginx/html/platform-ui.js
 USER nginx:nginx
 ENTRYPOINT ["nginx", "-g", "daemon off;"]
