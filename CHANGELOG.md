@@ -6,6 +6,14 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `tcpform doctor` project and host diagnostics with human-readable and JSON
+  output for raw sockets, Docker, formatter configuration, imports, plugin
+  signatures, and GitHub Actions.
+- Dependency-free Bash and Zsh completion generation through
+  `tcpform completion`.
+
 ## [0.2.0] - 2026-07-15
 
 ### Added

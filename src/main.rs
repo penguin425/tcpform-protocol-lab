@@ -41,6 +41,8 @@ fn main() {
         "schema" => cmd_schema(&args[2..]),
         "ci-snapshot" => cmd_ci_snapshot(&args[2..]),
         "ci-report" => cmd_ci_report(&args[2..]),
+        "doctor" => cmd_doctor(&args[2..]),
+        "completion" => cmd_completion(&args[2..]),
         "lsp" => cmd_lsp(),
         "gate" => cmd_gate(&args[2..]),
         "bundle" => cmd_bundle(&args[2..]),
@@ -85,6 +87,8 @@ fn usage() {
          tcpform schema dsl [--output <file>]\n  \
          tcpform ci-snapshot --output <file> <source> [protocol]\n  \
          tcpform ci-report <baseline.json> <current.json> [--markdown <file>] [--json <file>] [--fail-on-regression]\n  \
+         tcpform doctor [--json] [project-directory]\n  \
+         tcpform completion <bash|zsh>\n  \
          tcpform lsp\n  \
          tcpform gate <metrics.json> [--config <file>] [--profile <name>] [--baseline <file>] [--repeat <n>] [--markdown <file>] [--junit <file>] [--github]\n  \
          tcpform bundle --output <file> [--capture <file>] <source> <protocol>\n  \
@@ -552,6 +556,62 @@ fn cmd_ci_report(args: &[String]) -> Result<(), String> {
     {
         return Err("tcpform regression detected".into());
     }
+    Ok(())
+}
+
+fn cmd_doctor(args: &[String]) -> Result<(), String> {
+    let mut json = false;
+    let mut project = None;
+    for argument in args {
+        match argument.as_str() {
+            "--json" => json = true,
+            value if value.starts_with('-') => {
+                return Err(format!("unknown doctor option `{value}`"));
+            }
+            value if project.is_none() => project = Some(value),
+            _ => return Err("doctor accepts at most one project directory".into()),
+        }
+    }
+    let path = std::path::Path::new(project.unwrap_or("."));
+    if !path.is_dir() {
+        return Err(format!(
+            "project directory does not exist: {}",
+            path.display()
+        ));
+    }
+    let report = tcpform::doctor::diagnose(path);
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+        );
+    } else {
+        println!(
+            "tcpform doctor — tcpform {}, DSL v{}",
+            report.tcpform_version, report.dsl_version
+        );
+        println!("project: {}", report.project);
+        for check in &report.checks {
+            let label = match check.status {
+                tcpform::doctor::CheckStatus::Pass => "PASS",
+                tcpform::doctor::CheckStatus::Warn => "WARN",
+                tcpform::doctor::CheckStatus::Fail => "FAIL",
+            };
+            println!("{label:<4} {:<20} {}", check.name, check.message);
+        }
+    }
+    if report.healthy() {
+        Ok(())
+    } else {
+        Err("doctor found one or more fatal problems".into())
+    }
+}
+
+fn cmd_completion(args: &[String]) -> Result<(), String> {
+    if args.len() != 1 {
+        return Err("usage: tcpform completion <bash|zsh>".into());
+    }
+    print!("{}", tcpform::completion::generate(&args[0])?);
     Ok(())
 }
 

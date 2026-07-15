@@ -69,6 +69,9 @@ tcpform template list                  # list built-in protocol templates
 tcpform schema dsl                     # print the machine-readable DSL schema
 tcpform ci-snapshot --output result.json <file> [protocol]
 tcpform ci-report base.json result.json --markdown report.md
+tcpform doctor [--json] [project-directory] # diagnose host and project setup
+tcpform completion bash               # generate Bash completion
+tcpform completion zsh                # generate Zsh completion
 tcpform list <file>                    # list protocols, steps, roles
 tcpform plan   <file> <protocol>       # show the resolved topological order
 tcpform run    <file> <protocol>       # simulate and print the event timeline
@@ -102,6 +105,22 @@ tcpform orchestrate scenario.json [--dry-run]
 tcpform proxy --listen 127.0.0.1:8443 --upstream service:443 \
   --tls-cert proxy.pem --tls-key proxy-key.pem --tls-upstream \
   --ca upstream-ca.pem --server-name service
+```
+
+`tcpform doctor` checks the tcpform and DSL versions, raw-socket permissions,
+Docker Engine and Compose v2, `.tcpformfmt.json`, every `.tcpf` import graph,
+plugin signatures in `.tcpform/plugins.lock.json`, and GitHub Actions setup.
+Warnings describe optional capabilities; invalid configuration or broken
+imports produce a non-zero exit status. Use `--json` for CI or editor tooling.
+
+Install generated shell completions with one of the following:
+
+```sh
+# Bash
+tcpform completion bash > ~/.local/share/bash-completion/completions/tcpform
+
+# Zsh (ensure ~/.zfunc is in fpath)
+tcpform completion zsh > ~/.zfunc/_tcpform
 ```
 
 The formatter discovers `.tcpformfmt.json` or accepts an explicit `--config`.
