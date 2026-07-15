@@ -9,6 +9,7 @@ concurrency:
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -20,7 +21,7 @@ jobs:
         rust: [stable, "1.88"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
@@ -29,7 +30,7 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -39,12 +40,12 @@ jobs:
   case-report:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo run --locked -- test --jobs 4 --tag smoke --junit tcpform-junit.xml examples/dns_cases.tcpf dns_lookup
       - run: printf '%s\n' '{"success_rate":1,"p95_us":1000,"coverage":1,"retries":0}' > tcpform-metrics.json
       - run: cargo run --locked -- gate tcpform-metrics.json --min-success-rate 1 --max-p95-us 5000 --min-coverage 1 --max-retries 0
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: tcpform-junit
           path: tcpform-junit.xml
@@ -52,13 +53,13 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@cargo-llvm-cov
       - run: cargo llvm-cov --all --locked --lcov --output-path lcov.info
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: lcov.info
@@ -66,7 +67,7 @@ jobs:
   fuzz-smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
       - run: cargo install cargo-fuzz --locked
       - run: cargo fuzz run dsl --fuzz-dir fuzz -- -max_total_time=15
@@ -75,7 +76,7 @@ jobs:
   docker-raw:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: node dashboard/order.test.js
       - run: node dashboard/flow.test.js
       - run: node dashboard/packet-view.test.js
@@ -90,7 +91,7 @@ jobs:
           curl --fail --silent http://127.0.0.1:8088/data/tcp-server.json | grep -q '"status":"ok"'
       - if: always()
         run: ./scripts/docker-visual-lab.sh down
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: docker-raw-pcaps
@@ -100,9 +101,9 @@ jobs:
   browser-e2e:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
