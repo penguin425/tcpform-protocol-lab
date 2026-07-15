@@ -17,7 +17,7 @@ path = "src/main.rs"
 [dependencies]
 ed25519-dalek = "3.0.0"
 regex-lite = "0.1.9"
-rusqlite = { version = "0.40.1", features = ["bundled"] }
+rusqlite = { version = "0.39.0", features = ["bundled"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = "2.2"
 serde = { version = "1", features = ["derive"] }
@@ -29,7 +29,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "time", "io-util", "net"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 webpki-roots = "1"
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]

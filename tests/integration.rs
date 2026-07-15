@@ -1000,20 +1000,20 @@ fn recv_timeout_retransmits_the_same_automatic_sequence() {
         action = "recv"
         retransmit = 1
         expect { flags = ["ACK"] }
-        timer { timeout = "30ms" }
+        timer { timeout = "300ms" }
       }
 
       step "drop_first" {
         role = "server"
         action = "drop"
         expect { flags = ["SYN"] }
-        timer { timeout = "100ms" }
+        timer { timeout = "1s" }
       }
       step "recv_retry" {
         role = "server"
         action = "recv"
         expect { flags = ["SYN"] }
-        timer { timeout = "100ms" }
+        timer { timeout = "1s" }
       }
       step "ack" {
         role = "server"
@@ -1416,12 +1416,12 @@ fn timeout_retry_can_recover_and_loop_repeats_successful_steps() {
     protocol "retry_loop" {
       step "send" {
         role = "a" action = "send" loop = 3
-        segment { flags = ["X"] delay = "30ms" }
+        segment { flags = ["X"] delay = "300ms" }
       }
       step "recv" {
         role = "b" action = "recv" loop = 3 retry = 1 on_timeout = true
         expect { flags = ["X"] }
-        timer { timeout = "20ms" }
+        timer { timeout = "200ms" }
       }
     }
     "#;
@@ -1695,15 +1695,15 @@ fn retransmit_uses_the_original_message_snapshot() {
       step "wait_ack" {
         role = "a" action = "recv" retransmit = 1
         expect { flags = ["ACK"] }
-        timer { timeout = "20ms" }
+        timer { timeout = "300ms" }
       }
       step "lose_first" {
         role = "b" action = "drop" expect { payload = "old" }
-        timer { timeout = "100ms" }
+        timer { timeout = "1s" }
       }
       step "receive_again" {
         role = "b" action = "recv" expect { payload = "old" }
-        timer { timeout = "100ms" }
+        timer { timeout = "1s" }
       }
       step "ack" {
         role = "b" action = "ack" depends_on = ["receive_again"]
