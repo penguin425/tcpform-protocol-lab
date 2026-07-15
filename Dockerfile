@@ -18,7 +18,7 @@ COPY examples/docker /scenarios
 USER 0:0
 ENTRYPOINT ["/usr/local/bin/tcpform"]
 
-FROM nginx:1.27-alpine AS dashboard
+FROM nginx:1.31.2-alpine3.23-slim@sha256:dd722b8ee8794f3c273bfaf8b5351b0652a68ccd73c17e5f0d029857a58f25ef AS dashboard
 COPY dashboard/nginx.conf /etc/nginx/conf.d/default.conf
 COPY dashboard/index.html /usr/share/nginx/html/index.html
 COPY dashboard/order.js /usr/share/nginx/html/order.js
