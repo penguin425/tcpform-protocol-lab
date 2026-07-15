@@ -215,6 +215,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install tcpform
         run: cargo install --git https://github.com/penguin425/tcpform-protocol-lab.git --locked tcpform
+      - run: tcpform doctor .
       - run: tcpform validate protocol.tcpf
       - run: tcpform fmt --check protocol.tcpf
       - run: tcpform test --tag smoke protocol.tcpf

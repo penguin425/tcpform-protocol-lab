@@ -39,6 +39,8 @@
 pub mod ast;
 pub mod ci_report;
 pub mod compat;
+pub mod completion;
+pub mod doctor;
 pub mod engine;
 pub mod graph;
 pub mod loader;

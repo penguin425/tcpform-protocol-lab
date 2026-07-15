@@ -12,6 +12,48 @@ fn load_protocol(src: &str, name: &str) -> Protocol {
 }
 
 #[test]
+fn doctor_json_and_shell_completion_cli_are_available() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let project = std::env::temp_dir().join(format!("tcpform-doctor-cli-{unique}"));
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("protocol.tcpf"),
+        "tcpform { dsl_version = 2 }\n",
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_tcpform");
+    let output = std::process::Command::new(binary)
+        .args(["doctor", "--json"])
+        .arg(&project)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["dsl_version"], 2);
+    assert!(report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|check| check["name"] == "imports"));
+    for (shell, marker) in [("bash", "complete -F"), ("zsh", "#compdef tcpform")] {
+        let output = std::process::Command::new(binary)
+            .args(["completion", shell])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(String::from_utf8(output.stdout).unwrap().contains(marker));
+    }
+    std::fs::remove_dir_all(project).unwrap();
+}
+
+#[test]
 fn handshake_runs_to_completion() {
     let src = include_str!("../examples/tcp_handshake.tcpf");
     let p = load_protocol(src, "tcp_handshake");
