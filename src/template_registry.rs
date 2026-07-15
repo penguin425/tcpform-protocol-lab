@@ -104,18 +104,15 @@ pub fn add(root: &Path, registry_path: &Path, name: &str) -> Result<LockedTempla
         None,
         Some(&temporary),
     )?;
-    run_git(
-        &["checkout", "--quiet", "--detach", &entry.revision],
-        Some(&temporary),
-        None,
-    )?;
-    let actual_revision = git_output(&["rev-parse", "HEAD"], &temporary)?;
+    let revision_spec = format!("{}^{{commit}}", entry.revision);
+    let actual_revision = git_output(&["rev-parse", &revision_spec], &temporary)?;
     if actual_revision != entry.revision.to_ascii_lowercase() {
         let _ = fs::remove_dir_all(&temporary);
         return Err("repository did not resolve to the pinned revision".into());
     }
-    let relative = safe_relative_path(&entry.path)?;
-    let bytes = fs::read(temporary.join(relative))
+    safe_relative_path(&entry.path)?;
+    let blob_spec = format!("{}:{}", entry.revision, entry.path);
+    let bytes = git_bytes(&["show", &blob_spec], &temporary)
         .map_err(|error| format!("cannot read template `{}`: {error}", entry.path))?;
     verify(&entry, &bytes)?;
     let cache_relative = PathBuf::from(".tcpform/templates").join(format!("{}.tcpf", entry.sha256));
@@ -283,6 +280,15 @@ fn run_git(args: &[&str], cwd: Option<&Path>, destination: Option<&Path>) -> Res
 }
 
 fn git_output(args: &[&str], cwd: &Path) -> Result<String, String> {
+    let output = git_bytes_output(args, cwd)?;
+    Ok(String::from_utf8_lossy(&output).trim().to_ascii_lowercase())
+}
+
+fn git_bytes(args: &[&str], cwd: &Path) -> Result<Vec<u8>, String> {
+    git_bytes_output(args, cwd)
+}
+
+fn git_bytes_output(args: &[&str], cwd: &Path) -> Result<Vec<u8>, String> {
     let output = Command::new("git")
         .args(args)
         .current_dir(cwd)
@@ -291,9 +297,7 @@ fn git_output(args: &[&str], cwd: &Path) -> Result<String, String> {
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_ascii_lowercase())
+    Ok(output.stdout)
 }
 
 #[cfg(test)]
