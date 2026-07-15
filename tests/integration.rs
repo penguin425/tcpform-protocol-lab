@@ -54,6 +54,44 @@ fn doctor_json_and_shell_completion_cli_are_available() {
 }
 
 #[test]
+fn import_pcap_cli_generates_valid_dsl_and_smoke_case() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let capture = std::env::temp_dir().join(format!("tcpform-import-{unique}.pcapng"));
+    let output = std::env::temp_dir().join(format!("tcpform-import-{unique}.tcpf"));
+    let protocol = load_protocol(
+        include_str!("../examples/tcp_handshake.tcpf"),
+        "tcp_handshake",
+    );
+    let trace = Engine::new(protocol).unwrap().run().unwrap();
+    std::fs::write(&capture, tcpform::output::trace_pcapng(&trace)).unwrap();
+    let command = std::process::Command::new(env!("CARGO_BIN_EXE_tcpform"))
+        .arg("import-pcap")
+        .arg(&capture)
+        .args(["--protocol", "captured_handshake", "--output"])
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(
+        command.status.success(),
+        "{}",
+        String::from_utf8_lossy(&command.stderr)
+    );
+    let generated = std::fs::read_to_string(&output).unwrap();
+    assert!(generated.contains("frame_0001_send"));
+    assert!(generated.contains("capture_smoke"));
+    let blocks = tcpform::load_blocks(&output).unwrap();
+    assert_eq!(
+        tcpform::model::interpret(&blocks).unwrap()[0].name,
+        "captured_handshake"
+    );
+    std::fs::remove_file(capture).unwrap();
+    std::fs::remove_file(output).unwrap();
+}
+
+#[test]
 fn handshake_runs_to_completion() {
     let src = include_str!("../examples/tcp_handshake.tcpf");
     let p = load_protocol(src, "tcp_handshake");

@@ -8,6 +8,9 @@ All notable changes to tcpform are documented here. The format follows
 
 ### Added
 
+- `tcpform import-pcap` generation of starter DSL and smoke cases from classic
+  PCAP or PCAPNG TCP/UDP captures, including sessions, roles, headers, payloads,
+  and packet timing.
 - Full VS Code workflow with richer syntax highlighting, LSP-backed editing,
   format on save, protocol run/test CodeLens, an embedded Visualizer, and
   automatic DSL v2 schema generation.

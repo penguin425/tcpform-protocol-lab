@@ -48,6 +48,7 @@ pub mod model;
 pub mod output;
 pub mod packet;
 pub mod parser;
+pub mod pcap_import;
 pub mod platform;
 pub mod plugin;
 pub mod primitives;
