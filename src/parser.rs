@@ -1,4 +1,4 @@
-//! Hand-rolled lexer + recursive-descent parser for an HCL-like grammar.
+//! Hand-rolled lexer + recursive-descent parser for a block-oriented grammar.
 //!
 //! ```text
 //! file       := block*

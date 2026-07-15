@@ -1,7 +1,7 @@
 # tcpform
 
 Compose protocol primitives — `send`, `recv`, `ack`, `wait`, `close` — into
-**new protocols** using a **Terraform-style declarative DSL**, then **simulate**
+**new protocols** using a **declarative protocol DSL**, then **simulate**
 them and inspect the message timeline.
 
 You describe a protocol as ordered, composable steps (with flags, sequence
@@ -9,8 +9,8 @@ numbers, ack numbers, payloads, timers and cross-step dependencies); `tcpform`
 builds a dependency graph, validates it, and runs both endpoints against an
 in-memory or real TCP/UDP transport, printing a trace of every segment exchanged.
 
-> Think "Terraform for wire protocols": declare the *shape* of a conversation,
-> `plan` it, then `run` it.
+> Declare the *shape* of a protocol conversation, validate its dependency
+> graph, then run both endpoints against simulated or real transports.
 
 ## Build & run
 
@@ -239,7 +239,7 @@ result: ok (6 events)
 
 A `.tcpf` file contains `protocol` blocks; each contains `step` blocks.
 
-```hcl
+```text
 protocol "tcp_handshake" {
   description = "TCP three-way handshake"
 
@@ -357,7 +357,7 @@ Segments carry a `fields` object of key/value pairs alongside the raw
 headers, gRPC metadata) and test individual fields without full-message
 equality:
 
-```hcl
+```text
 # send with structured fields
 segment { flags = ["DNS"] fields = { id = 4242 name = "example.com" qtype = 1 } }
 
@@ -387,7 +387,7 @@ Segments can carry raw binary payloads via `hex = "..."`. Hex strings accept
 an optional `0x` prefix and embedded whitespace (so `"45 00 00 3c"` is valid).
 `hex` takes precedence over `payload` when both are set:
 
-```hcl
+```text
 # send a binary payload
 segment { flags = ["DNS"] hex = "1234 0100 0001 0000 0000 0000 07 6578616d706c65 03 636f6d 00" }
 
@@ -401,7 +401,7 @@ expect { flags = ["DNS"] hex_contains = "6578616d706c65" }
 Binary field values use `fields = { key = { hex = "aabb" } }`. Captured binary
 fields can be interpolated back into `hex` payloads via `${var}`:
 
-```hcl
+```text
 # field with binary value
 segment { flags = ["DNS"] fields = { id = { hex = "1234" } } }
 
@@ -422,7 +422,7 @@ captures dotted header fields. Checksums and lengths default to automatic
 values; explicit values and `"invalid"` intentionally produce malformed test
 packets. IPv4/IPv6 fragmentation is enabled with a step-level `mtu`.
 
-```hcl
+```text
 protocol "raw_syn" {
   raw_tcp_stateful = true
 
@@ -664,7 +664,7 @@ unknown-dependency validation, and retry-recovery demonstrations.
 
 Proprietary application headers can be decoded without changing tcpform code:
 
-```hcl
+```text
 header_schema "acme" {
   offset = 0
   endian = "big"
@@ -685,7 +685,7 @@ significant bit; `bits` selects up to 64 bits. Supported formats are `uint`,
 `expect { capture { id = "txn_id" } }` saves the received `id` field into the
 role's variable `txn_id`. Later `send` steps can interpolate it:
 
-```hcl
+```text
 segment { flags = ["DNS"] fields = { id = "${txn_id}" rdata = "1.2.3.4" } }
 ```
 
@@ -706,7 +706,7 @@ reused rather than advanced by a retry.
 
 An optional protocol-level block injects faults into every outbound segment:
 
-```hcl
+```text
 transport {
   loss_rate = 0.10
   delay     = "50ms"
@@ -725,7 +725,7 @@ Set `seed` to a non-zero integer to replay the same loss and reorder choices.
 still considered complete for dependency purposes, which makes it useful with
 `cases`:
 
-```hcl
+```text
 step "maybe_drop" {
   role = "server" action = "drop" when = "${drop_first}"
   expect { flags = ["DATA"] }
@@ -747,7 +747,7 @@ configuration, and checked for cycles. `as` namespaces an import and `only`
 selects protocols and case suites; the same file can be instantiated under
 multiple aliases:
 
-```hcl
+```text
 import "shared/tcp.tcpf"
 import "shared/http.tcpf" { as = "v1" only = ["request"] }
 import "shared/http.tcpf" { as = "v2" only = ["request"] }
@@ -756,7 +756,7 @@ import "shared/http.tcpf" { as = "v2" only = ["request"] }
 Modules provide namespaces. Nested names are joined with dots, so this defines
 `network.tcp.handshake`:
 
-```hcl
+```text
 module "network" {
   module "tcp" {
     protocol "handshake" { ... }
@@ -770,7 +770,7 @@ Use `clock = "virtual"` on a protocol for fast, reproducible timer tests.
 Waits, retry backoff, transport delay, and receive timeouts advance the virtual
 clock without sleeping for their declared duration. Real time is the default.
 
-```hcl
+```text
 protocol "bounded" {
   clock = "virtual"
   limits {
@@ -854,16 +854,16 @@ state and **fails the run** on any mismatch. Built-in keys:
 | *(user var)*      | any     | any key written by `set` or `capture`    |
 
 Both `segment { ... }` (nested block) and `segment = { ... }` (object
-attribute) forms are accepted, HCL-style. Quoted string keys (`"my-key" =
-1`) are supported in objects and blocks.
+attribute) forms are accepted by the block-oriented configuration syntax.
+Quoted string keys (`"my-key" = 1`) are supported in objects and blocks.
 
 ## Data-driven testing (`cases`)
 
 A `cases` block runs the same protocol multiple times with different inputs,
-checking each run's outcome and per-role final state. This is the Terraform
-"test" equivalent — one protocol definition, many parameterized test cases.
+checking each run's outcome and per-role final state as a data-driven test
+matrix — one protocol definition, many parameterized test cases.
 
-```hcl
+```text
 protocol "dns_lookup" {
   step "query"  { role = "client" action = "send" segment { fields = { name = "${qname}" } } }
   step "rquery" { role = "server" action = "recv" expect { flags = ["DNS"] } }
@@ -1013,7 +1013,7 @@ Run any with `tcpform run examples/<file>.tcpf <protocol>`.
 Add a new `protocol` block (or a new file). For example, a request/response
 with a timed gap (`examples/custom.tcpf`):
 
-```hcl
+```text
 protocol "ping_pong" {
   step "ping"      { role="client" action="send" to="server" segment { flags=["PING"] payload="hello" } }
   step "recv_ping" { role="server" action="recv" expect { flags=["PING"] from="client" } }
@@ -1028,7 +1028,7 @@ protocol "ping_pong" {
 | module          | responsibility                                             |
 |-----------------|------------------------------------------------------------|
 | `value.rs`      | typed DSL values                                           |
-| `ast.rs`        | generic HCL-like block tree                                |
+| `ast.rs`        | generic block-oriented syntax tree                          |
 | `parser.rs`     | hand-rolled lexer + recursive-descent parser (no deps)     |
 | `loader.rs`     | recursive relative imports and cycle detection              |
 | `model.rs`      | interpret AST → `Protocol` / `Step` / `Segment` / `Expect` |
