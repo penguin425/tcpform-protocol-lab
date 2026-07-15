@@ -6,6 +6,8 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-15
+
 ### Changed
 
 - Replaced third-party product and configuration-language comparisons with
