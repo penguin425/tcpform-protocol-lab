@@ -1416,12 +1416,12 @@ fn timeout_retry_can_recover_and_loop_repeats_successful_steps() {
     protocol "retry_loop" {
       step "send" {
         role = "a" action = "send" loop = 3
-        segment { flags = ["X"] delay = "300ms" }
+        segment { flags = ["X"] delay = "500ms" }
       }
       step "recv" {
-        role = "b" action = "recv" loop = 3 retry = 1 on_timeout = true
+        role = "b" action = "recv" loop = 3 retry = 10 on_timeout = true
         expect { flags = ["X"] }
-        timer { timeout = "200ms" }
+        timer { timeout = "50ms" }
       }
     }
     "#;
