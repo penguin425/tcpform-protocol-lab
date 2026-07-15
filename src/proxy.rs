@@ -133,9 +133,30 @@ async fn pump<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
 ) -> Result<(), String> {
     let mut buffer = vec![0u8; 65_536];
     loop {
-        let length = reader.read(&mut buffer).await.map_err(|e| e.to_string())?;
+        let length = match reader.read(&mut buffer).await {
+            Ok(length) => length,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::BrokenPipe
+                        | std::io::ErrorKind::UnexpectedEof
+                ) =>
+            {
+                let _ = writer.shutdown().await;
+                return Ok(());
+            }
+            Err(error) => return Err(error.to_string()),
+        };
         if length == 0 {
-            writer.shutdown().await.map_err(|e| e.to_string())?;
+            if let Err(error) = writer.shutdown().await {
+                if !matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe
+                ) {
+                    return Err(error.to_string());
+                }
+            }
             return Ok(());
         }
         if let Some(file) = &capture {
