@@ -6,6 +6,11 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Updated the Docker publishing actions to their Node.js 24-based major
+  versions.
+
 ## [0.5.0] - 2026-07-15
 
 ### Added
