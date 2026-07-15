@@ -264,7 +264,7 @@ pub fn verify_plugin(
     if !lock.capabilities.iter().any(|v| v == requested) {
         return Err("plugin capability denied".into());
     }
-    let actual = format!("{:x}", Sha256::digest(bytes));
+    let actual = crate::bytes_to_hex(&Sha256::digest(bytes));
     if actual != lock.sha256 {
         return Err("plugin hash does not match lock file".into());
     }
@@ -408,7 +408,7 @@ mod tests {
         let lock = PluginLock {
             id: "p".into(),
             version: "1".into(),
-            sha256: format!("{:x}", Sha256::digest(bytes)),
+            sha256: crate::bytes_to_hex(&Sha256::digest(bytes)),
             capabilities: vec!["decode".into()],
             signature_hex: String::new(),
             public_key_hex: String::new(),
@@ -424,7 +424,7 @@ mod tests {
         let lock = PluginLock {
             id: "p".into(),
             version: "1".into(),
-            sha256: format!("{:x}", Sha256::digest(bytes)),
+            sha256: crate::bytes_to_hex(&Sha256::digest(bytes)),
             capabilities: vec!["decode".into()],
             signature_hex: crate::bytes_to_hex(&signature.to_bytes()),
             public_key_hex: crate::bytes_to_hex(&signing.verifying_key().to_bytes()),
