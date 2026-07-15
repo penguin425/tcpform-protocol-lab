@@ -22,16 +22,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME")"
-          object_type="$(jq -r '.object.type' <<<"$tag_object")"
-          object_sha="$(jq -r '.object.sha' <<<"$tag_object")"
+          object_type="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" --jq '.object.type')"
+          object_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" --jq '.object.sha')"
           if [ "$object_type" != "tag" ]; then
             echo "$GITHUB_REF_NAME must be an annotated, signed tag" >&2
             exit 1
           fi
-          verification="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha")"
-          verified="$(jq -r '.verification.verified' <<<"$verification")"
-          reason="$(jq -r '.verification.reason' <<<"$verification")"
+          verified="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" --jq '.verification.verified')"
+          reason="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" --jq '.verification.reason')"
           if [ "$verified" != "true" ]; then
             echo "$GITHUB_REF_NAME signature verification failed: $reason" >&2
             exit 1
