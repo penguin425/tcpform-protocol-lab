@@ -34,5 +34,5 @@ libc = "0.2"
 
 [dev-dependencies]
 proptest = "1"
-quick-xml = "0.38"
+quick-xml = "0.41"
 rcgen = "0.14"
