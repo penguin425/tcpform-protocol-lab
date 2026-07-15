@@ -6,6 +6,8 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-07-16
+
 ### Fixed
 
 - Include `platform-ui.js` in the dashboard image so initialization can load
@@ -110,7 +112,8 @@ All notable changes to tcpform are documented here. The format follows
   live transports, raw packet workflows, browser visualizer, test cases, fault
   injection, PCAP output, LSP, formatter, bundles, plugins, and CI tooling.
 
-[Unreleased]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.4.0...v0.4.1
