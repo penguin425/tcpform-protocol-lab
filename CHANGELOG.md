@@ -8,6 +8,8 @@ All notable changes to tcpform are documented here. The format follows
 
 ### Added
 
+- Git-friendly local snapshot creation, checking, and explicit updates with
+  packet, header, state-machine, result, latency, and Visualizer data.
 - `tcpform import-pcap` generation of starter DSL and smoke cases from classic
   PCAP or PCAPNG TCP/UDP captures, including sessions, roles, headers, payloads,
   and packet timing.
