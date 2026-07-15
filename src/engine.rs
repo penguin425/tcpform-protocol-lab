@@ -1,6 +1,6 @@
-//! The execution engine. Runs a validated [`Plan`] by spawning one thread per
-//! role; each role executes its steps in plan order, blocking on explicit
-//! `depends_on` for cross-role synchronization, and exchanging [`Message`]s
+//! The execution engine. Runs a validated [`Plan`](crate::graph::Plan) by
+//! spawning one thread per role; each role executes its steps in plan order,
+//! blocking on explicit `depends_on` for cross-role synchronization, and exchanging [`Message`]s
 //! over the simulated [`Transport`]. Produces a timestamped [`TraceEvent`]
 //! timeline.
 
