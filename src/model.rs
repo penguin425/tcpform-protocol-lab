@@ -2076,7 +2076,7 @@ fn validate_top_level(blocks: &[Block]) -> Result<(), ModelError> {
     for block in blocks {
         if !matches!(
             block.name.as_str(),
-            "protocol" | "cases" | "module" | "import"
+            "protocol" | "cases" | "module" | "import" | "tcpform"
         ) {
             return Err(at_block(
                 err(format!("unknown top-level block `{}`", block.name)),
