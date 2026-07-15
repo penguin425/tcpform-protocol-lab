@@ -9,7 +9,7 @@ protocol "advanced_actions" {
       flags  = ["DATA"]
       hex    = "deadbeef"
       flip   = 3
-      delay  = "15ms"
+      delay  = "150ms"
       fields = { path = "/api/items.json" email = "ops@example.com" }
     }
   }
@@ -28,6 +28,6 @@ protocol "advanced_actions" {
         email = { regex = ".*@example\\.com$" }
       }
     }
-    timer { timeout = "10ms" }
+    timer { timeout = "100ms" }
   }
 }
