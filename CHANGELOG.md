@@ -8,6 +8,9 @@ All notable changes to tcpform are documented here. The format follows
 
 ### Added
 
+- Full VS Code workflow with richer syntax highlighting, LSP-backed editing,
+  format on save, protocol run/test CodeLens, an embedded Visualizer, and
+  automatic DSL v2 schema generation.
 - `tcpform doctor` project and host diagnostics with human-readable and JSON
   output for raw sockets, Docker, formatter configuration, imports, plugin
   signatures, and GitHub Actions.

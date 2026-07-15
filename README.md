@@ -127,9 +127,11 @@ The formatter discovers `.tcpformfmt.json` or accepts an explicit `--config`.
 Supported keys are `indent_width`, `align_attributes`, and
 `preserve_inline_blocks`. The LSP provides diagnostics, completion,
 definitions, references, rename, hover, document/workspace symbols, semantic
-tokens, formatting, code actions, and inlay hints. A minimal VS Code client is
-available in `editors/vscode`; run `npm install` in that directory before
-packaging or launching its extension development host.
+tokens, formatting, code actions, and inlay hints. The VS Code extension in
+`editors/vscode` adds syntax highlighting, format-on-save defaults, protocol
+run/test CodeLens, an embedded Visualizer webview, and automatic local DSL v2
+JSON Schema generation. Configure `tcpform.executable` when the binary is not
+on `PATH`; run `npm install` before packaging or launching the extension host.
 
 The browser visualizer includes a Protocol workbench for boolean trace queries,
 LCS-aligned trace/header/payload diffs, generated fault variants, state-machine
