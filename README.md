@@ -67,6 +67,9 @@ tcpform validate <file>                # parse + validate every protocol
 tcpform init demo --template websocket # scaffold a protocol project and CI
 tcpform template list                  # list built-in protocol templates
 tcpform schema dsl                     # print the machine-readable DSL schema
+tcpform snapshot protocol.tcpf         # create/check protocol.tcpf.snapshot.json
+tcpform snapshot --check protocol.tcpf # fail when behavior differs from Git
+tcpform snapshot --update protocol.tcpf # accept current behavior as baseline
 tcpform ci-snapshot --output result.json <file> [protocol]
 tcpform ci-report base.json result.json --markdown report.md
 tcpform doctor [--json] [project-directory] # diagnose host and project setup
@@ -129,6 +132,14 @@ raw-IP link types. It groups IPv4/IPv6 TCP and UDP packets into sessions and
 generates roles, endpoint/header comments, timing delays, payload hex,
 send/receive steps, and a smoke case. Treat generated DSL as a reviewable
 starting point: captures may contain credentials or other sensitive payloads.
+
+`tcpform snapshot` stores packets, decoded headers, state transitions, case
+success rates, P95 latency, and the complete Visualizer manifest in readable
+JSON. Commit the generated `*.snapshot.json` file to Git and use `--check` in
+CI. Running without a mode creates a missing snapshot and checks an existing
+one; `--update` explicitly replaces it. Runtime latency has a 1000 µs default
+tolerance, configurable with `--latency-tolerance-us`, while protocol structure
+and packet data are compared exactly. Use `--output` to choose another path.
 
 The formatter discovers `.tcpformfmt.json` or accepts an explicit `--config`.
 Supported keys are `indent_width`, `align_attributes`, and

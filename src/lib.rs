@@ -53,6 +53,7 @@ pub mod platform;
 pub mod plugin;
 pub mod primitives;
 pub mod raw_socket;
+pub mod snapshot;
 pub mod storage;
 pub mod templates;
 pub mod tls_audit;

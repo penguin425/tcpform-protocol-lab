@@ -92,6 +92,50 @@ fn import_pcap_cli_generates_valid_dsl_and_smoke_case() {
 }
 
 #[test]
+fn snapshot_cli_creates_checks_rejects_changes_and_updates() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("tcpform-snapshot-{unique}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("protocol.tcpf");
+    let snapshot = dir.join("expected.json");
+    let write_protocol = |payload: &str| {
+        std::fs::write(
+            &source,
+            format!("tcpform {{ dsl_version=2 }}\nprotocol \"snap\" {{ step \"send\" {{ role=\"client\" action=\"send\" segment {{ payload=\"{payload}\" }} }} }}\n"),
+        )
+        .unwrap();
+    };
+    let run = |mode: Option<&str>| {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_tcpform"));
+        command.arg("snapshot");
+        if let Some(mode) = mode {
+            command.arg(mode);
+        }
+        command
+            .arg("--output")
+            .arg(&snapshot)
+            .arg(&source)
+            .output()
+            .unwrap()
+    };
+    write_protocol("hello");
+    assert!(run(None).status.success());
+    let document: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&snapshot).unwrap()).unwrap();
+    assert_eq!(document["snapshot_version"], "1.0");
+    assert!(document["visualizer"][0]["steps"].is_array());
+    assert!(run(Some("--check")).status.success());
+    write_protocol("changed");
+    assert!(!run(Some("--check")).status.success());
+    assert!(run(Some("--update")).status.success());
+    assert!(run(Some("--check")).status.success());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn handshake_runs_to_completion() {
     let src = include_str!("../examples/tcp_handshake.tcpf");
     let p = load_protocol(src, "tcp_handshake");

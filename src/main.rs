@@ -39,6 +39,7 @@ fn main() {
         "init" => cmd_init(&args[2..]),
         "template" => cmd_template(&args[2..]),
         "schema" => cmd_schema(&args[2..]),
+        "snapshot" => cmd_snapshot(&args[2..]),
         "ci-snapshot" => cmd_ci_snapshot(&args[2..]),
         "ci-report" => cmd_ci_report(&args[2..]),
         "doctor" => cmd_doctor(&args[2..]),
@@ -86,6 +87,7 @@ fn usage() {
          tcpform init [directory] [--name <name>] [--template <name>] [--force]\n  \
          tcpform template <list|show <name>>\n  \
          tcpform schema dsl [--output <file>]\n  \
+         tcpform snapshot [--check|--update] [--output <file>] [--latency-tolerance-us <n>] <source> [protocol]\n  \
          tcpform ci-snapshot --output <file> <source> [protocol]\n  \
          tcpform ci-report <baseline.json> <current.json> [--markdown <file>] [--json <file>] [--fail-on-regression]\n  \
          tcpform doctor [--json] [project-directory]\n  \
@@ -507,6 +509,77 @@ fn cmd_ci_snapshot(args: &[String]) -> Result<(), String> {
         format!("{}\n", serde_json::to_string_pretty(&snapshot).unwrap()),
     )
     .map_err(|error| error.to_string())
+}
+
+fn cmd_snapshot(args: &[String]) -> Result<(), String> {
+    let check = args.iter().any(|arg| arg == "--check");
+    let update = args.iter().any(|arg| arg == "--update");
+    if check && update {
+        return Err("--check and --update cannot be used together".into());
+    }
+    let value_after = |flag: &str| -> Result<Option<&String>, String> {
+        args.iter()
+            .position(|arg| arg == flag)
+            .map(|index| {
+                args.get(index + 1)
+                    .ok_or_else(|| format!("{flag} requires a value"))
+            })
+            .transpose()
+    };
+    let output = value_after("--output")?;
+    let tolerance = value_after("--latency-tolerance-us")?
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|_| "--latency-tolerance-us must be an integer".to_string())
+        })
+        .transpose()?
+        .unwrap_or(1_000);
+    let mut positional = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--check" | "--update" => index += 1,
+            "--output" | "--latency-tolerance-us" => index += 2,
+            value if value.starts_with('-') => {
+                return Err(format!("unknown snapshot option `{value}`"))
+            }
+            _ => {
+                positional.push(&args[index]);
+                index += 1;
+            }
+        }
+    }
+    let source = positional
+        .first()
+        .ok_or("snapshot requires a source file")?;
+    let snapshot_path = output
+        .cloned()
+        .unwrap_or_else(|| format!("{source}.snapshot.json"));
+    let (protocols, suites) = load_with_cases(source)?;
+    let current = tcpform::snapshot::create(
+        &protocols,
+        &suites,
+        positional.get(1).map(|value| value.as_str()),
+    )?;
+    let path = std::path::Path::new(&snapshot_path);
+    if check || (path.exists() && !update) {
+        let baseline: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(path)
+                .map_err(|error| format!("cannot read {}: {error}", path.display()))?,
+        )
+        .map_err(|error| format!("invalid snapshot {}: {error}", path.display()))?;
+        tcpform::snapshot::check(&baseline, &current, tolerance)?;
+        println!("snapshot matches {}", path.display());
+        return Ok(());
+    }
+    fs::write(
+        path,
+        format!("{}\n", serde_json::to_string_pretty(&current).unwrap()),
+    )
+    .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+    println!("snapshot written to {}", path.display());
+    Ok(())
 }
 
 fn cmd_ci_report(args: &[String]) -> Result<(), String> {
