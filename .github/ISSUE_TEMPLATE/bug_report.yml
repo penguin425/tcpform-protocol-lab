@@ -1,0 +1,59 @@
+name: Bug report
+description: Report reproducible incorrect behavior in tcpform
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve tcpform. Do not include secrets or private packet data.
+  - type: input
+    id: version
+    attributes:
+      label: tcpform version or commit
+      placeholder: v0.1.1 or commit SHA
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: Ubuntu 24.04, macOS, Windows, Docker, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include a sanitized `.tcpf` file and the exact command when possible.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add sanitized logs, traces, captures, or reproduction bundles.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched for an existing issue.
+          required: true
+        - label: I removed credentials and identifying traffic data.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
+

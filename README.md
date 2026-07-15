@@ -955,6 +955,14 @@ concurrent inbox delivery, including arbitrary packet decoder inputs. `fuzz/` co
 and hex decoder. CI runs the test suite on Linux/macOS/Windows with stable and
 MSRV Rust, plus formatting, Clippy, coverage, dependency updates, and fuzz smoke.
 
+## Community
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before
+opening a pull request and follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) in
+project spaces. Report vulnerabilities privately as described in
+[SECURITY.md](SECURITY.md). User-visible changes are tracked in
+[CHANGELOG.md](CHANGELOG.md).
+
 ## Operational notes
 
 - Live mode models both roles in one process over a real loopback socket; it is
