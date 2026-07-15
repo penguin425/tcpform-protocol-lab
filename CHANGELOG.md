@@ -6,6 +6,11 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Raised the minimum supported Rust version from 1.88 to 1.97 and updated the
+  digest-pinned Docker builder image accordingly.
+
 ## [0.3.1] - 2026-07-15
 
 ### Security
