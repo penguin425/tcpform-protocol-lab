@@ -6,6 +6,8 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-15
+
 ### Security
 
 - Update the dashboard to the digest-pinned nginx 1.31.2 Alpine 3.23 slim image
@@ -67,7 +69,8 @@ All notable changes to tcpform are documented here. The format follows
   live transports, raw packet workflows, browser visualizer, test cases, fault
   injection, PCAP output, LSP, formatter, bundles, plugins, and CI tooling.
 
-[Unreleased]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.1.0...v0.1.1
