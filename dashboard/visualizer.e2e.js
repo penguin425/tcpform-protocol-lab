@@ -147,6 +147,10 @@ test('uses the protocol workbench for query, diff, faults, state, refactor, bund
   const stateDownload = page.waitForEvent('download');
   await page.locator('#state-svg').click();
   expect((await stateDownload).suggestedFilename()).toBe('state-machine.svg');
+  await page.locator('#next-event').click();
+  await page.locator('#trace-note').fill('e2e annotation');
+  await page.locator('#add-trace-note').click();
+  await expect(page.locator('#share-output')).toContainText('Annotation saved');
   await page.locator('#find-unused').click();
   await expect(page.locator('#refactor-output')).toContainText('unused:');
   await page.locator('#rename-kind').selectOption('step');
@@ -162,10 +166,6 @@ test('uses the protocol workbench for query, diff, faults, state, refactor, bund
   await expect(page.locator('#refactor-output')).toHaveText('formatted');
   await page.locator('#run-gate').click();
   await expect(page.locator('#share-output')).toContainText(/PASS|FAIL/);
-  await page.locator('#next-event').click();
-  await page.locator('#trace-note').fill('e2e annotation');
-  await page.locator('#add-trace-note').click();
-  await expect(page.locator('#share-output')).toContainText('Annotation saved');
   const reportDownload = page.waitForEvent('download');
   await page.locator('#export-html-report').click();
   expect((await reportDownload).suggestedFilename()).toBe('tcpform-report.html');
