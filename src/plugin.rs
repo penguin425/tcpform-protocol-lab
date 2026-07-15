@@ -259,6 +259,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn manifest_validation_and_json_rpc_invocation_work() {
         let result = invoke_plugin(&manifest(), "matcher", "custom", json!({"actual":1})).unwrap();
         assert_eq!(result["matched"], true);

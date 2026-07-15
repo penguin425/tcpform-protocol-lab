@@ -1,5 +1,12 @@
 name: CI
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
   pull_request:
@@ -61,7 +68,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-      - uses: taiki-e/install-action@cargo-fuzz
+      - run: cargo install cargo-fuzz --locked
       - run: cargo fuzz run dsl --fuzz-dir fuzz -- -max_total_time=15
       - run: cargo fuzz run hex --fuzz-dir fuzz -- -max_total_time=15
 
@@ -102,3 +109,25 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+
+  ci-success:
+    name: CI success
+    if: always()
+    needs:
+      - test
+      - quality
+      - case-report
+      - coverage
+      - fuzz-smoke
+      - docker-raw
+      - browser-e2e
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify every required job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          if printf '%s' "$RESULTS" | grep -Eq '"result": "(failure|cancelled|skipped)"'; then
+            printf '%s\n' "$RESULTS"
+            exit 1
+          fi
