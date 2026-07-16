@@ -115,6 +115,8 @@ tcpform run --external --websocket --role client --connect ws://host/path <file>
 tcpform run --external --quic --role client --connect host:port \
   --server-name example.com --alpn my-protocol <file> <protocol>
 tcpform run --external --unix --role client --connect /tmp/service.sock <file> <protocol>
+tcpform conformance --connect host:port --role client --json report.json \
+  --markdown report.md --junit report.xml <file> <protocol>
 ./scripts/docker-raw-test.sh          # isolated two-container raw packet lab
 ./scripts/docker-visual-lab.sh up     # run lab and open the browser dashboard
 tcpform test --jobs 8 --tag smoke <file> [protocol]
@@ -180,6 +182,13 @@ and unsupported encapsulations are reported with line numbers rather than
 silently changing their meaning. Imports preserve the declared application
 length as `payload_len`, but cannot recover payload contents because
 packetdrill packet events contain lengths rather than application bytes.
+
+`tcpform conformance` drives a target implementation with one DSL role and
+records every applicable step as passed, failed, or not run. It supports the
+same TCP, UDP, TLS, WebSocket, QUIC, Unix socket, framing, and endpoint options
+as external runs. JSON is printed when no output path is given; JSON, Markdown,
+and JUnit files can be emitted together. A nonconformant result exits non-zero,
+including after writing reports, so it can be used as a CI gate.
 
 `tcpform snapshot` stores packets, decoded headers, state transitions, case
 success rates, P95 latency, and the complete Visualizer manifest in readable
