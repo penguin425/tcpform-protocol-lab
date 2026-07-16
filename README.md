@@ -93,6 +93,7 @@ tcpform completion bash               # generate Bash completion
 tcpform completion zsh                # generate Zsh completion
 tcpform import-pcap capture.pcapng --protocol captured --output captured.tcpf \
   --analysis captured.inference.json
+tcpform import-kaitai telemetry.ksy --output telemetry.tcpf
 tcpform list <file>                    # list protocols, steps, roles
 tcpform plan   <file> <protocol>       # show the resolved topological order
 tcpform run    <file> <protocol>       # simulate and print the event timeline
@@ -154,6 +155,14 @@ comments, timing delays, payload hex, send/receive steps, and a smoke case.
 sample values as JSON for review or downstream tooling. Treat all inferred DSL
 and field boundaries as hypotheses: captures may be incomplete and may contain
 credentials or other sensitive payloads.
+
+`tcpform import-kaitai` imports the fixed-layout subset of a Kaitai Struct
+`.ksy` schema into a tcpform `header_schema`. Integer, bit, fixed-size string,
+byte, and `contents` fields are assigned deterministic offsets; fields longer
+than eight bytes are split to respect tcpform's decoder limits. Conditional,
+repeated, expression-sized, user-defined, and end-of-stream fields produce
+explicit warnings because their offsets cannot be represented safely in a
+static header schema. The generated protocol includes a runnable smoke case.
 
 `tcpform snapshot` stores packets, decoded headers, state transitions, case
 success rates, P95 latency, and the complete Visualizer manifest in readable

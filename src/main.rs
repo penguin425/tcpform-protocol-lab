@@ -45,6 +45,7 @@ fn main() {
         "doctor" => cmd_doctor(&args[2..]),
         "completion" => cmd_completion(&args[2..]),
         "import-pcap" => cmd_import_pcap(&args[2..]),
+        "import-kaitai" => cmd_import_kaitai(&args[2..]),
         "lsp" => cmd_lsp(),
         "gate" => cmd_gate(&args[2..]),
         "bundle" => cmd_bundle(&args[2..]),
@@ -93,6 +94,7 @@ fn usage() {
          tcpform doctor [--json] [project-directory]\n  \
          tcpform completion <bash|zsh>\n  \
          tcpform import-pcap <capture.pcap|capture.pcapng> --protocol <name> --output <file> [--analysis <report.json>]\n  \
+         tcpform import-kaitai <schema.ksy> --output <file> [--protocol <name>]\n  \
          tcpform lsp\n  \
          tcpform gate <metrics.json> [--config <file>] [--profile <name>] [--baseline <file>] [--repeat <n>] [--markdown <file>] [--junit <file>] [--github]\n  \
          tcpform bundle --output <file> [--capture <file>] <source> <protocol>\n  \
@@ -781,6 +783,46 @@ fn cmd_import_pcap(args: &[String]) -> Result<(), String> {
         fs::write(path, format!("{document}\n"))
             .map_err(|error| format!("cannot write `{path}`: {error}"))?;
         println!("generated {path}");
+    }
+    println!("generated {output}");
+    Ok(())
+}
+
+fn cmd_import_kaitai(args: &[String]) -> Result<(), String> {
+    let mut input = None;
+    let mut output = None;
+    let mut protocol = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--output" => {
+                index += 1;
+                output = Some(args.get(index).ok_or("--output requires a file")?.as_str());
+            }
+            "--protocol" => {
+                index += 1;
+                protocol = Some(
+                    args.get(index)
+                        .ok_or("--protocol requires a name")?
+                        .as_str(),
+                );
+            }
+            value if value.starts_with('-') => {
+                return Err(format!("unknown import-kaitai option `{value}`"));
+            }
+            value if input.is_none() => input = Some(value),
+            _ => return Err("import-kaitai accepts one schema file".into()),
+        }
+        index += 1;
+    }
+    let input = input.ok_or("import-kaitai requires a .ksy schema")?;
+    let output = output.ok_or("import-kaitai requires --output <file>")?;
+    let source =
+        fs::read_to_string(input).map_err(|error| format!("cannot read `{input}`: {error}"))?;
+    let imported = tcpform::kaitai::import_ksy(&source, protocol)?;
+    fs::write(output, imported.dsl).map_err(|error| format!("cannot write `{output}`: {error}"))?;
+    for warning in imported.warnings {
+        eprintln!("warning: {warning}");
     }
     println!("generated {output}");
     Ok(())

@@ -105,6 +105,44 @@ fn import_pcap_cli_generates_valid_dsl_and_smoke_case() {
 }
 
 #[test]
+fn import_kaitai_cli_generates_valid_header_schema_and_warns_on_dynamic_fields() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let schema = std::env::temp_dir().join(format!("tcpform-kaitai-{unique}.ksy"));
+    let output = std::env::temp_dir().join(format!("tcpform-kaitai-{unique}.tcpf"));
+    std::fs::write(
+        &schema,
+        "meta:\n  id: sensor_frame\n  endian: le\nseq:\n  - { id: version, type: u1 }\n  - { id: reading, type: u4 }\n  - { id: payload, size-eos: true }\n",
+    )
+    .unwrap();
+    let command = std::process::Command::new(env!("CARGO_BIN_EXE_tcpform"))
+        .arg("import-kaitai")
+        .arg(&schema)
+        .arg("--output")
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(
+        command.status.success(),
+        "{}",
+        String::from_utf8_lossy(&command.stderr)
+    );
+    assert!(String::from_utf8_lossy(&command.stderr).contains("warning:"));
+    let generated = std::fs::read_to_string(&output).unwrap();
+    assert!(generated.contains("endian = \"little\""));
+    assert!(generated.contains("reading = { offset = 1 length = 4"));
+    let blocks = tcpform::load_blocks(&output).unwrap();
+    assert_eq!(
+        tcpform::model::interpret(&blocks).unwrap()[0].name,
+        "sensor_frame"
+    );
+    std::fs::remove_file(schema).unwrap();
+    std::fs::remove_file(output).unwrap();
+}
+
+#[test]
 fn snapshot_cli_creates_checks_rejects_changes_and_updates() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

@@ -43,6 +43,7 @@ pub mod completion;
 pub mod doctor;
 pub mod engine;
 pub mod graph;
+pub mod kaitai;
 pub mod loader;
 pub mod model;
 pub mod output;

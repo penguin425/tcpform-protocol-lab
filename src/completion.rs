@@ -11,14 +11,14 @@ pub fn generate(shell: &str) -> Result<&'static str, String> {
 }
 
 #[cfg(test)]
-const COMMANDS: &str = "validate list plan visualize serve fmt migrate init template schema snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore generate-faults plugin tls-audit differential platform run test doctor completion import-pcap help";
+const COMMANDS: &str = "validate list plan visualize serve fmt migrate init template schema snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore generate-faults plugin tls-audit differential platform run test doctor completion import-pcap import-kaitai help";
 
 const BASH: &str = r#"_tcpform() {
   local cur prev commands
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
-  commands="validate list plan visualize serve fmt migrate init template schema snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore generate-faults plugin tls-audit differential platform run test doctor completion import-pcap help"
+  commands="validate list plan visualize serve fmt migrate init template schema snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore generate-faults plugin tls-audit differential platform run test doctor completion import-pcap import-kaitai help"
   case "$prev" in
     completion) COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") ); return ;;
     template) COMPREPLY=( $(compgen -W "list show search add" -- "$cur") ); return ;;
@@ -52,6 +52,7 @@ _tcpform() {
     'platform:platform integrations' 'run:run a protocol' 'test:run case suites'
     'doctor:diagnose project and host' 'completion:generate shell completion' 'help:show help'
     'import-pcap:generate starter DSL from PCAP or PCAPNG'
+    'import-kaitai:import a Kaitai Struct ksy schema'
   )
   templates=(tcp-handshake dns http websocket tls)
   if (( CURRENT == 2 )); then
