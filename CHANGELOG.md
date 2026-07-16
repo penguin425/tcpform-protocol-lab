@@ -6,6 +6,23 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-17
+
+### Added
+
+- Infer TCP session roles, protocol states, repeated-payload fields, and header
+  schemas when generating DSL from PCAP or PCAPNG captures.
+- Import fixed-layout Kaitai Struct schemas into tcpform header schemas with
+  explicit warnings for unsupported dynamic constructs.
+- Export field-aware Wireshark Lua dissectors and Scapy packet definitions.
+- Generate boofuzz harnesses and AFLNet seed corpora from declarative protocol
+  flows.
+- Import and export supported packetdrill packet scripts.
+- Produce requirement-level protocol conformance reports for external targets
+  in JSON, Markdown, and JUnit formats.
+- Test two or more implementations and report pairwise observable differences
+  as an interoperability compatibility matrix.
+
 ## [0.5.2] - 2026-07-16
 
 ### Fixed
@@ -112,7 +129,8 @@ All notable changes to tcpform are documented here. The format follows
   live transports, raw packet workflows, browser visualizer, test cases, fault
   injection, PCAP output, LSP, formatter, bundles, plugins, and CI tooling.
 
-[Unreleased]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.4.1...v0.5.0
