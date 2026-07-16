@@ -117,6 +117,8 @@ tcpform run --external --quic --role client --connect host:port \
 tcpform run --external --unix --role client --connect /tmp/service.sock <file> <protocol>
 tcpform conformance --connect host:port --role client --json report.json \
   --markdown report.md --junit report.xml <file> <protocol>
+tcpform interop --targets implementations.json --role client \
+  --json interop.json --markdown interop.md --junit interop.xml <file> <protocol>
 ./scripts/docker-raw-test.sh          # isolated two-container raw packet lab
 ./scripts/docker-visual-lab.sh up     # run lab and open the browser dashboard
 tcpform test --jobs 8 --tag smoke <file> [protocol]
@@ -136,6 +138,23 @@ tcpform orchestrate scenario.json [--dry-run]
 tcpform proxy --listen 127.0.0.1:8443 --upstream service:443 \
   --tls-cert proxy.pem --tls-key proxy-key.pem --tls-upstream \
   --ca upstream-ca.pem --server-name service
+```
+
+`tcpform interop` drives two or more named TCP implementations with the same
+DSL role, records failures without stopping the remaining runs, and compares
+every implementation pair while excluding timing noise. Its JSON report
+contains implementation results, event-level differences, and a symmetric
+compatibility matrix. JSON, Markdown, and JUnit can be emitted together; any
+failed implementation or observable divergence returns a non-zero status for
+CI. The target file has this form:
+
+```json
+{
+  "implementations": [
+    { "name": "reference", "address": "127.0.0.1:9001" },
+    { "name": "candidate", "address": "127.0.0.1:9002" }
+  ]
+}
 ```
 
 `tcpform doctor` checks the tcpform and DSL versions, raw-socket permissions,

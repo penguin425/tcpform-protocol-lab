@@ -45,6 +45,7 @@ pub mod doctor;
 pub mod engine;
 pub mod fuzz_export;
 pub mod graph;
+pub mod interoperability;
 pub mod kaitai;
 pub mod loader;
 pub mod model;

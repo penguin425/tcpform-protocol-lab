@@ -3815,3 +3815,111 @@ fn conformance_cli_writes_reports_for_conformant_and_nonconformant_targets() {
     }
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn interoperability_cli_builds_a_matrix_for_three_external_implementations() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    fn server(response: &'static [u8]) -> (String, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 4];
+            stream.read_exact(&mut request).unwrap();
+            assert_eq!(&request, b"ping");
+            stream.write_all(response).unwrap();
+        });
+        (address, handle)
+    }
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!("tcpform-interop-{unique}"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let source = directory.join("protocol.tcpf");
+    std::fs::write(
+        &source,
+        r#"protocol "interop" {
+          step "send" { role="client" action="send" to="server" segment { payload="ping" } }
+          step "recv" { role="client" action="recv" depends_on=["send"] expect { from="server" } timer { timeout="2s" } }
+          step "peer" { role="server" action="log" }
+        }"#,
+    )
+    .unwrap();
+
+    for (responses, interoperable) in [
+        ([b"pong" as &'static [u8], b"pong", b"pong"], true),
+        ([b"pong" as &'static [u8], b"pong", b"pang"], false),
+    ] {
+        let servers = responses.map(server);
+        let config = directory.join(if interoperable {
+            "same-targets.json"
+        } else {
+            "different-targets.json"
+        });
+        let implementations = servers
+            .iter()
+            .enumerate()
+            .map(|(index, (address, _))| {
+                serde_json::json!({"name": format!("implementation-{}", index + 1), "address": address})
+            })
+            .collect::<Vec<_>>();
+        std::fs::write(
+            &config,
+            serde_json::to_vec(&serde_json::json!({"implementations": implementations})).unwrap(),
+        )
+        .unwrap();
+        let suffix = if interoperable { "same" } else { "different" };
+        let json = directory.join(format!("{suffix}.json"));
+        let markdown = directory.join(format!("{suffix}.md"));
+        let junit = directory.join(format!("{suffix}.xml"));
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_tcpform"))
+            .arg("interop")
+            .arg("--targets")
+            .arg(&config)
+            .args(["--role", "client"])
+            .arg("--json")
+            .arg(&json)
+            .arg("--markdown")
+            .arg(&markdown)
+            .arg("--junit")
+            .arg(&junit)
+            .arg(&source)
+            .arg("interop")
+            .output()
+            .unwrap();
+        for (_, handle) in servers {
+            handle.join().unwrap();
+        }
+        assert_eq!(
+            output.status.success(),
+            interoperable,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&json).unwrap()).unwrap();
+        assert_eq!(report["implementations"].as_array().unwrap().len(), 3);
+        assert_eq!(report["comparisons"].as_array().unwrap().len(), 3);
+        assert_eq!(report["compatibility_matrix"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            report["status"],
+            if interoperable {
+                "interoperable"
+            } else {
+                "not_interoperable"
+            }
+        );
+        assert!(std::fs::read_to_string(&markdown)
+            .unwrap()
+            .contains("Compatibility matrix"));
+        assert!(std::fs::read_to_string(&junit)
+            .unwrap()
+            .contains("tests=\"3\""));
+    }
+    std::fs::remove_dir_all(directory).unwrap();
+}
