@@ -55,6 +55,7 @@ fn main() {
         "proxy" => cmd_proxy(&args[2..]),
         "explore" => cmd_explore(&args[2..]),
         "generate-faults" => cmd_generate_faults(&args[2..]),
+        "fuzz-export" => cmd_fuzz_export(&args[2..]),
         "plugin" => cmd_plugin(&args[2..]),
         "tls-audit" => cmd_tls_audit(&args[2..]),
         "differential" => cmd_differential(&args[2..]),
@@ -104,6 +105,7 @@ fn usage() {
          tcpform proxy --listen <address> --upstream <address> [TLS options]\n  \
          tcpform explore <source> <protocol>\n  \
          tcpform generate-faults --output <directory> <source>\n  \
+         tcpform fuzz-export <boofuzz|aflnet> <source> <protocol> --role <role> --output <path> [--host <host> --port <port>]\n  \
          tcpform plugin <manifest.json> <action|matcher|decoder|report> <name> <input.json>\n  \
          tcpform tls-audit (--cert <file> | --connect <address> --server-name <name>) [--ca <file>] [--alpn <protocol>] [--warn-days <days>]\n  \
          tcpform differential --left <address> --right <address> --role <role> [--framing <kind>] <file> <protocol>\n  \
@@ -234,6 +236,66 @@ fn cmd_platform(args: &[String]) -> Result<(), String> {
         }
         other => Err(format!("unknown platform subcommand `{other}`")),
     }
+}
+
+fn cmd_fuzz_export(args: &[String]) -> Result<(), String> {
+    let target = args
+        .first()
+        .map(String::as_str)
+        .ok_or("fuzz-export requires boofuzz or aflnet")?;
+    if !matches!(target, "boofuzz" | "aflnet") {
+        return Err("fuzz-export target must be boofuzz or aflnet".into());
+    }
+    let source = args.get(1).ok_or("fuzz-export requires a DSL source")?;
+    let name = args.get(2).ok_or("fuzz-export requires a protocol name")?;
+    let mut role = None;
+    let mut output = None;
+    let mut host = "127.0.0.1";
+    let mut port = 0u16;
+    let mut index = 3;
+    while index < args.len() {
+        let option = args[index].as_str();
+        index += 1;
+        let value = args
+            .get(index)
+            .ok_or_else(|| format!("{option} requires a value"))?;
+        match option {
+            "--role" => role = Some(value.as_str()),
+            "--output" => output = Some(value.as_str()),
+            "--host" => host = value,
+            "--port" => port = value.parse().map_err(|_| "invalid --port")?,
+            _ => return Err(format!("unknown fuzz-export option `{option}`")),
+        }
+        index += 1;
+    }
+    let role = role.ok_or("fuzz-export requires --role <role>")?;
+    let output = output.ok_or("fuzz-export requires --output <path>")?;
+    let protocols = interpret(&load_blocks(source)?).map_err(|error| error.to_string())?;
+    let protocol = find(&protocols, name)?;
+    match target {
+        "boofuzz" => {
+            let script = tcpform::fuzz_export::boofuzz_script(protocol, role, host, port)?;
+            fs::write(output, script)
+                .map_err(|error| format!("cannot write `{output}`: {error}"))?;
+        }
+        "aflnet" => {
+            let export = tcpform::fuzz_export::aflnet_seed(protocol, role)?;
+            fs::create_dir_all(output)
+                .map_err(|error| format!("cannot create `{output}`: {error}"))?;
+            let directory = std::path::Path::new(output);
+            fs::write(directory.join("seed_0001.raw"), export.seed)
+                .map_err(|error| error.to_string())?;
+            fs::write(directory.join("tcpform.dict"), export.dictionary)
+                .map_err(|error| error.to_string())?;
+            let manifest = serde_json::to_string_pretty(&export.manifest)
+                .map_err(|error| error.to_string())?;
+            fs::write(directory.join("manifest.json"), format!("{manifest}\n"))
+                .map_err(|error| error.to_string())?;
+        }
+        _ => unreachable!(),
+    }
+    println!("generated {output}");
+    Ok(())
 }
 
 fn cmd_plugin(args: &[String]) -> Result<(), String> {

@@ -171,6 +171,58 @@ fn protocol_exporters_emit_field_aware_wireshark_and_scapy_code() {
 }
 
 #[test]
+fn fuzz_export_cli_writes_boofuzz_harness_and_aflnet_corpus() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!("tcpform-fuzz-export-{unique}"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let source = directory.join("protocol.tcpf");
+    let boofuzz = directory.join("fuzz.py");
+    let corpus = directory.join("aflnet");
+    std::fs::write(
+        &source,
+        r#"protocol "service" {
+          step "hello" { role="client" action="send" to="server" segment { payload="HELLO" } }
+          step "command" { role="client" action="send" to="server" segment { hex="010203" } }
+        }"#,
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_tcpform");
+    let status = std::process::Command::new(binary)
+        .args(["fuzz-export", "boofuzz"])
+        .arg(&source)
+        .args(["service", "--role", "client", "--output"])
+        .arg(&boofuzz)
+        .args(["--port", "9000"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let script = std::fs::read_to_string(&boofuzz).unwrap();
+    assert!(script.contains("Session(target=Target"));
+    assert!(script.contains("session.connect(s_get(\"hello\"), s_get(\"command\"))"));
+
+    let status = std::process::Command::new(binary)
+        .args(["fuzz-export", "aflnet"])
+        .arg(&source)
+        .args(["service", "--role", "client", "--output"])
+        .arg(&corpus)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert_eq!(
+        std::fs::read(corpus.join("seed_0001.raw")).unwrap(),
+        b"HELLO\x01\x02\x03"
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(corpus.join("manifest.json")).unwrap())
+            .unwrap();
+    assert_eq!(manifest["messages"][1]["offset"], 5);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn snapshot_cli_creates_checks_rejects_changes_and_updates() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
