@@ -1,6 +1,7 @@
 //! PCAP/PCAPNG decoding and starter DSL generation.
 
-use std::collections::HashMap;
+use serde::Serialize;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +31,37 @@ struct Session {
     number: usize,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct CaptureInference {
+    pub schema_version: &'static str,
+    pub packet_count: usize,
+    pub sessions: Vec<SessionInference>,
+    pub fields: Vec<FieldInference>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SessionInference {
+    pub id: String,
+    pub transport: String,
+    pub client: String,
+    pub server: String,
+    pub packet_count: usize,
+    pub states: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct FieldInference {
+    pub session: String,
+    pub direction: String,
+    pub name: String,
+    pub offset: usize,
+    pub length: usize,
+    pub kind: String,
+    pub confidence: f64,
+    pub examples_hex: Vec<String>,
+}
+
 pub fn import_capture(bytes: &[u8], protocol: &str) -> Result<String, String> {
     validate_name(protocol)?;
     let packets = decode_capture(bytes)?;
@@ -37,6 +69,14 @@ pub fn import_capture(bytes: &[u8], protocol: &str) -> Result<String, String> {
         return Err("capture contains no supported IPv4/IPv6 TCP or UDP packets".into());
     }
     Ok(render_dsl(&packets, protocol))
+}
+
+pub fn analyze_capture(bytes: &[u8]) -> Result<CaptureInference, String> {
+    let packets = decode_capture(bytes)?;
+    if packets.is_empty() {
+        return Err("capture contains no supported IPv4/IPv6 TCP or UDP packets".into());
+    }
+    Ok(analyze_packets(&packets))
 }
 
 pub fn decode_capture(bytes: &[u8]) -> Result<Vec<CapturedPacket>, String> {
@@ -277,22 +317,13 @@ fn decode_transport(
 }
 
 fn render_dsl(packets: &[CapturedPacket], protocol: &str) -> String {
-    let mut sessions = HashMap::<String, Session>::new();
-    let mut next_session = 1;
-    for packet in packets {
-        let key = session_key(packet);
-        sessions.entry(key).or_insert_with(|| {
-            let number = next_session;
-            next_session += 1;
-            Session {
-                client: (packet.source.clone(), packet.source_port),
-                number,
-            }
-        });
-    }
+    let sessions = build_sessions(packets);
+    let inference = analyze_packets_with_sessions(packets, &sessions);
     let mut out = format!("tcpform {{ dsl_version = 2 }}\n\n# Generated from a packet capture. Review roles, secrets, and assertions before use.\nprotocol \"{protocol}\" {{\n  description = \"Imported {} packet(s) across {} session(s)\"\n  clock = \"virtual\"\n", packets.len(), sessions.len());
+    render_inferred_schemas(&mut out, &inference.fields);
     let mut previous = None::<String>;
     let mut last_timestamp = packets[0].timestamp_ns;
+    let mut role_states = HashMap::<String, String>::new();
     for (index, packet) in packets.iter().enumerate() {
         let session = &sessions[&session_key(packet)];
         let source_is_client = session.client == (packet.source.clone(), packet.source_port);
@@ -335,6 +366,14 @@ fn render_dsl(packets: &[CapturedPacket], protocol: &str) -> String {
         if let Some(dependency) = &previous {
             out.push_str(&format!("    depends_on = [\"{dependency}\"]\n"));
         }
+        let source_before = role_states
+            .get(&source_role)
+            .cloned()
+            .unwrap_or_else(|| "initial".into());
+        let source_after = infer_endpoint_state(&source_before, packet, false);
+        out.push_str(&format!(
+            "    from_state = \"{source_before}\"\n    to_state = \"{source_after}\"\n"
+        ));
         out.push_str("    segment {\n");
         out.push_str(&format!("      flags = [{flags}]\n"));
         if let Some(sequence) = packet.sequence {
@@ -356,12 +395,316 @@ fn render_dsl(packets: &[CapturedPacket], protocol: &str) -> String {
             ));
         }
         out.push_str("    }\n  }\n");
-        out.push_str(&format!("  step \"{recv_name}\" {{\n    role = \"{destination_role}\"\n    action = \"recv\"\n    depends_on = [\"{send_name}\"]\n    expect {{ from = \"{source_role}\" flags = [{flags}] }}\n  }}\n"));
+        role_states.insert(source_role.clone(), source_after);
+        let destination_before = role_states
+            .get(&destination_role)
+            .cloned()
+            .unwrap_or_else(|| "initial".into());
+        let destination_after = infer_endpoint_state(&destination_before, packet, true);
+        out.push_str(&format!("  step \"{recv_name}\" {{\n    role = \"{destination_role}\"\n    action = \"recv\"\n    depends_on = [\"{send_name}\"]\n    from_state = \"{destination_before}\"\n    to_state = \"{destination_after}\"\n    expect {{ from = \"{source_role}\" flags = [{flags}] }}\n  }}\n"));
+        role_states.insert(destination_role, destination_after);
         previous = Some(recv_name);
         last_timestamp = packet.timestamp_ns;
     }
     out.push_str(&format!("}}\n\ncases \"{protocol}\" {{\n  case \"capture_smoke\" {{ expect = \"pass\" tags = [\"smoke\", \"pcap-import\"] }}\n}}\n"));
     out
+}
+
+fn build_sessions(packets: &[CapturedPacket]) -> HashMap<String, Session> {
+    let mut order = Vec::<String>::new();
+    let mut grouped = HashMap::<String, Vec<&CapturedPacket>>::new();
+    for packet in packets {
+        let key = session_key(packet);
+        if !grouped.contains_key(&key) {
+            order.push(key.clone());
+        }
+        grouped.entry(key).or_default().push(packet);
+    }
+    order
+        .into_iter()
+        .enumerate()
+        .map(|(index, key)| {
+            let packets = &grouped[&key];
+            let initiator = packets
+                .iter()
+                .find(|packet| {
+                    packet.transport == "tcp"
+                        && packet.flags.iter().any(|flag| flag == "SYN")
+                        && !packet.flags.iter().any(|flag| flag == "ACK")
+                })
+                .copied()
+                .unwrap_or(packets[0]);
+            (
+                key,
+                Session {
+                    client: (initiator.source.clone(), initiator.source_port),
+                    number: index + 1,
+                },
+            )
+        })
+        .collect()
+}
+
+fn analyze_packets(packets: &[CapturedPacket]) -> CaptureInference {
+    let sessions = build_sessions(packets);
+    analyze_packets_with_sessions(packets, &sessions)
+}
+
+fn analyze_packets_with_sessions(
+    packets: &[CapturedPacket],
+    sessions: &HashMap<String, Session>,
+) -> CaptureInference {
+    let mut grouped = BTreeMap::<usize, Vec<&CapturedPacket>>::new();
+    for packet in packets {
+        grouped
+            .entry(sessions[&session_key(packet)].number)
+            .or_default()
+            .push(packet);
+    }
+    let mut session_reports = Vec::new();
+    let mut fields = Vec::new();
+    for (number, packets) in grouped {
+        let session = &sessions[&session_key(packets[0])];
+        let client = format!("{}:{}", session.client.0, session.client.1);
+        let first = packets[0];
+        let server = if session.client == (first.source.clone(), first.source_port) {
+            format!("{}:{}", first.destination, first.destination_port)
+        } else {
+            format!("{}:{}", first.source, first.source_port)
+        };
+        let mut states = vec!["initial".to_string()];
+        let mut current = "initial".to_string();
+        for packet in &packets {
+            let next = infer_session_state(&current, packet);
+            if next != current {
+                states.push(next.clone());
+                current = next;
+            }
+        }
+        let id = format!("session_{number}");
+        fields.extend(infer_payload_fields(&id, session, &packets));
+        session_reports.push(SessionInference {
+            id,
+            transport: first.transport.clone(),
+            client,
+            server,
+            packet_count: packets.len(),
+            states,
+        });
+    }
+    let mut warnings = vec![
+        "inferred states and fields are hypotheses; review them before testing an implementation"
+            .into(),
+    ];
+    if fields.is_empty() {
+        warnings
+            .push("no repeated same-direction payloads were available for field inference".into());
+    }
+    CaptureInference {
+        schema_version: "1.0",
+        packet_count: packets.len(),
+        sessions: session_reports,
+        fields,
+        warnings,
+    }
+}
+
+fn infer_payload_fields(
+    session_id: &str,
+    session: &Session,
+    packets: &[&CapturedPacket],
+) -> Vec<FieldInference> {
+    let mut directions = BTreeMap::<&str, Vec<&[u8]>>::new();
+    for packet in packets.iter().filter(|packet| !packet.payload.is_empty()) {
+        let direction = if session.client == (packet.source.clone(), packet.source_port) {
+            "client_to_server"
+        } else {
+            "server_to_client"
+        };
+        directions
+            .entry(direction)
+            .or_default()
+            .push(&packet.payload);
+    }
+    let mut result = Vec::new();
+    for (direction, samples) in directions {
+        if samples.len() < 2 {
+            continue;
+        }
+        let width = samples.iter().map(|sample| sample.len()).min().unwrap_or(0);
+        if width == 0 {
+            continue;
+        }
+        let constant = (0..width)
+            .map(|offset| {
+                samples
+                    .iter()
+                    .all(|sample| sample[offset] == samples[0][offset])
+            })
+            .collect::<Vec<_>>();
+        let mut offset = 0;
+        let mut constant_index = 1;
+        let mut variable_index = 1;
+        while offset < width {
+            let fixed = constant[offset];
+            let start = offset;
+            while offset < width && constant[offset] == fixed {
+                offset += 1;
+            }
+            let length = offset - start;
+            let (name, kind, confidence) = if fixed {
+                let ascii = samples[0][start..offset]
+                    .iter()
+                    .all(|byte| byte.is_ascii_graphic() || *byte == b' ');
+                let name = format!("constant_{constant_index}");
+                constant_index += 1;
+                (name, if ascii { "ascii" } else { "hex" }, 1.0)
+            } else {
+                let name = format!("variable_{variable_index}");
+                variable_index += 1;
+                (name, "variable", 0.75)
+            };
+            let examples_hex = samples
+                .iter()
+                .map(|sample| crate::bytes_to_hex(&sample[start..offset]))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .take(3)
+                .collect();
+            result.push(FieldInference {
+                session: session_id.into(),
+                direction: direction.into(),
+                name,
+                offset: start,
+                length,
+                kind: kind.into(),
+                confidence,
+                examples_hex,
+            });
+        }
+        if samples.iter().any(|sample| sample.len() != width) {
+            result.push(FieldInference {
+                session: session_id.into(),
+                direction: direction.into(),
+                name: "variable_tail".into(),
+                offset: width,
+                length: samples
+                    .iter()
+                    .map(|sample| sample.len())
+                    .max()
+                    .unwrap_or(width)
+                    - width,
+                kind: "variable_length".into(),
+                confidence: 1.0,
+                examples_hex: samples
+                    .iter()
+                    .filter(|sample| sample.len() > width)
+                    .map(|sample| crate::bytes_to_hex(&sample[width..]))
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .take(3)
+                    .collect(),
+            });
+        }
+    }
+    result
+}
+
+fn render_inferred_schemas(out: &mut String, fields: &[FieldInference]) {
+    let mut groups = BTreeMap::<(&str, &str), Vec<&FieldInference>>::new();
+    for field in fields.iter().filter(|field| field.length > 0) {
+        groups
+            .entry((&field.session, &field.direction))
+            .or_default()
+            .push(field);
+    }
+    for ((session, direction), fields) in groups {
+        out.push_str(&format!(
+            "\n  # Inferred from repeated payloads; verify before relying on these boundaries.\n  header_schema \"{session}_{direction}\" {{\n    offset = 0\n    endian = \"big\"\n    fields = {{\n"
+        ));
+        for field in fields {
+            let format = if field.kind == "ascii" {
+                "ascii"
+            } else {
+                "hex"
+            };
+            out.push_str(&format!(
+                "      {} = {{ offset = {} length = {} format = \"{}\" }}\n",
+                field.name, field.offset, field.length, format
+            ));
+        }
+        out.push_str("    }\n  }\n");
+    }
+}
+
+fn infer_session_state(current: &str, packet: &CapturedPacket) -> String {
+    if packet.transport == "udp" {
+        return "active".into();
+    }
+    let has = |flag: &str| packet.flags.iter().any(|candidate| candidate == flag);
+    if has("RST") {
+        "reset".into()
+    } else if has("FIN") {
+        if current == "closing" {
+            "closed".into()
+        } else {
+            "closing".into()
+        }
+    } else if has("SYN") && has("ACK") {
+        "syn_ack".into()
+    } else if has("SYN") {
+        "syn".into()
+    } else if (has("ACK") && matches!(current, "syn_ack" | "syn")) || !packet.payload.is_empty() {
+        "established".into()
+    } else if current == "closing" && has("ACK") {
+        "closed".into()
+    } else {
+        current.into()
+    }
+}
+
+fn infer_endpoint_state(current: &str, packet: &CapturedPacket, receiving: bool) -> String {
+    if packet.transport == "udp" {
+        return "active".into();
+    }
+    let has = |flag: &str| packet.flags.iter().any(|candidate| candidate == flag);
+    if has("RST") {
+        return "reset".into();
+    }
+    if has("FIN") {
+        return if receiving {
+            "fin_received"
+        } else {
+            "fin_sent"
+        }
+        .into();
+    }
+    if has("SYN") && has("ACK") {
+        return if receiving {
+            "syn_ack_received"
+        } else {
+            "syn_ack_sent"
+        }
+        .into();
+    }
+    if has("SYN") {
+        return if receiving {
+            "syn_received"
+        } else {
+            "syn_sent"
+        }
+        .into();
+    }
+    if !packet.payload.is_empty()
+        || has("ACK")
+            && matches!(
+                current,
+                "syn_sent" | "syn_received" | "syn_ack_sent" | "syn_ack_received"
+            )
+    {
+        return "established".into();
+    }
+    current.into()
 }
 
 fn session_key(packet: &CapturedPacket) -> String {
@@ -504,5 +847,67 @@ mod tests {
         assert_eq!(packets[0].destination_port, 53);
         assert_eq!(packets[0].payload, b"dns");
         assert_eq!(packets[0].timestamp_ns, 123_000);
+    }
+
+    #[test]
+    fn infers_handshake_states_and_repeated_payload_fields() {
+        let packet = |timestamp_ns: u64,
+                      source: &str,
+                      destination: &str,
+                      flags: &[&str],
+                      payload: &[u8]|
+         -> CapturedPacket {
+            CapturedPacket {
+                timestamp_ns,
+                source: source.into(),
+                destination: destination.into(),
+                source_port: if source == "client" { 40_000 } else { 9000 },
+                destination_port: if destination == "server" {
+                    9000
+                } else {
+                    40_000
+                },
+                transport: "tcp".into(),
+                flags: flags.iter().map(|flag| (*flag).into()).collect(),
+                sequence: Some(timestamp_ns as u32),
+                acknowledgement: Some(0),
+                payload: payload.into(),
+                frame_length: 54 + payload.len(),
+            }
+        };
+        let packets = vec![
+            packet(1, "client", "server", &["SYN"], b""),
+            packet(2, "server", "client", &["SYN", "ACK"], b""),
+            packet(3, "client", "server", &["ACK"], b""),
+            packet(4, "client", "server", &["PSH", "ACK"], b"TF\x01alpha"),
+            packet(5, "client", "server", &["PSH", "ACK"], b"TF\x02bravo"),
+        ];
+        let report = analyze_packets(&packets);
+        assert_eq!(report.sessions.len(), 1);
+        assert_eq!(report.sessions[0].client, "client:40000");
+        assert_eq!(
+            report.sessions[0].states,
+            ["initial", "syn", "syn_ack", "established"]
+        );
+        assert!(report
+            .fields
+            .iter()
+            .any(|field| { field.offset == 0 && field.length == 2 && field.kind == "ascii" }));
+        assert!(report
+            .fields
+            .iter()
+            .any(|field| { field.offset == 2 && field.length >= 1 && field.kind == "variable" }));
+
+        let generated = render_dsl(&packets, "inferred");
+        assert!(generated.contains("header_schema \"session_1_client_to_server\""));
+        assert!(generated.contains("from_state = \"syn_ack_received\""));
+        assert!(generated.contains("to_state = \"established\""));
+        let blocks = crate::parse_file(&generated).unwrap();
+        let protocols = crate::model::interpret(&blocks).unwrap();
+        let cases = crate::model::interpret_cases(&blocks).unwrap();
+        let results = crate::Engine::new(protocols[0].clone())
+            .unwrap()
+            .run_cases(&cases[0].cases);
+        assert!(results.iter().all(|result| result.passed), "{results:?}");
     }
 }
