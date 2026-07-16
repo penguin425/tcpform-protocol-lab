@@ -49,6 +49,7 @@ pub mod loader;
 pub mod model;
 pub mod output;
 pub mod packet;
+pub mod packetdrill;
 pub mod parser;
 pub mod pcap_import;
 pub mod platform;

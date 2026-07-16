@@ -223,6 +223,59 @@ fn fuzz_export_cli_writes_boofuzz_harness_and_aflnet_corpus() {
 }
 
 #[test]
+fn packetdrill_cli_imports_and_exports_supported_packet_events() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!("tcpform-packetdrill-{unique}"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let packetdrill = directory.join("input.pkt");
+    let dsl = directory.join("output.tcpf");
+    let roundtrip = directory.join("roundtrip.pkt");
+    std::fs::write(
+        &packetdrill,
+        "0 socket(..., SOCK_STREAM, IPPROTO_TCP) = 3\n+0 < S 0:0(0)\n+0 > S. 0:0(0) ack 1\n+.005 < P. 1:4(3) ack 1\n",
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_tcpform");
+    let imported = std::process::Command::new(binary)
+        .args(["packetdrill", "import"])
+        .arg(&packetdrill)
+        .args([
+            "--protocol",
+            "converted",
+            "--local-role",
+            "server",
+            "--peer-role",
+            "client",
+            "--output",
+        ])
+        .arg(&dsl)
+        .output()
+        .unwrap();
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    assert!(String::from_utf8_lossy(&imported.stderr).contains("line 1"));
+    assert!(tcpform::load_blocks(&dsl).is_ok());
+
+    let exported = std::process::Command::new(binary)
+        .args(["packetdrill", "export"])
+        .arg(&dsl)
+        .args(["converted", "--local-role", "server", "--output"])
+        .arg(&roundtrip)
+        .output()
+        .unwrap();
+    assert!(exported.status.success());
+    let roundtrip = std::fs::read_to_string(roundtrip).unwrap();
+    assert!(roundtrip.contains("< P. 1:4(3) ack 1"));
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn snapshot_cli_creates_checks_rejects_changes_and_updates() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
