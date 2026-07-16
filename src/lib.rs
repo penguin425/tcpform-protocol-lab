@@ -42,6 +42,7 @@ pub mod compat;
 pub mod completion;
 pub mod doctor;
 pub mod engine;
+pub mod fuzz_export;
 pub mod graph;
 pub mod kaitai;
 pub mod loader;

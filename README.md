@@ -120,6 +120,8 @@ tcpform fmt [--check|--write] [--indent 4] [--align] <file...>
 tcpform fmt --stdin [--config .tcpformfmt.json]
 tcpform lsp                           # Language Server Protocol over stdio
 tcpform generate-faults --output faults <file>
+tcpform fuzz-export boofuzz protocol.tcpf demo --role client --output fuzz.py --port 9000
+tcpform fuzz-export aflnet protocol.tcpf demo --role client --output aflnet-seeds
 tcpform explore <file> <protocol>     # loss/delay/seed matrix + minimal failure
 tcpform bundle --output repro.tcpfbundle <file> <protocol>
 tcpform replay-bundle repro.tcpfbundle
@@ -173,6 +175,14 @@ CI. Running without a mode creates a missing snapshot and checks an existing
 one; `--update` explicitly replaces it. Runtime latency has a 1000 µs default
 tolerance, configurable with `--latency-tolerance-us`, while protocol structure
 and packet data are compared exactly. Use `--output` to choose another path.
+
+`tcpform fuzz-export boofuzz` converts the selected role's ordered, static send
+payloads into a connected boofuzz request graph. The generated Python script
+requires an explicit or generated host and port and does not run automatically.
+`tcpform fuzz-export aflnet` writes `seed_0001.raw`, a message-boundary
+`manifest.json`, and an AFL dictionary. Interpolated payloads are rejected
+instead of being exported with unresolved variables. Run fuzzers only against
+systems you own or are explicitly authorized to test.
 
 External templates use `.tcpform/template-registry.json` as an explicit trust
 policy. Each entry names a trusted owner, semantic version, full 40-character
