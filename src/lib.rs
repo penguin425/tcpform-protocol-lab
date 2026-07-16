@@ -40,6 +40,7 @@ pub mod ast;
 pub mod ci_report;
 pub mod compat;
 pub mod completion;
+pub mod conformance;
 pub mod doctor;
 pub mod engine;
 pub mod fuzz_export;

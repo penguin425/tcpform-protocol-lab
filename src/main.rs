@@ -60,6 +60,7 @@ fn main() {
         "plugin" => cmd_plugin(&args[2..]),
         "tls-audit" => cmd_tls_audit(&args[2..]),
         "differential" => cmd_differential(&args[2..]),
+        "conformance" => cmd_conformance(&args[2..]),
         "platform" => cmd_platform(&args[2..]),
         "run" => cmd_run(&args[2..]),
         "test" => cmd_test(&args[2..]),
@@ -112,6 +113,7 @@ fn usage() {
          tcpform plugin <manifest.json> <action|matcher|decoder|report> <name> <input.json>\n  \
          tcpform tls-audit (--cert <file> | --connect <address> --server-name <name>) [--ca <file>] [--alpn <protocol>] [--warn-days <days>]\n  \
          tcpform differential --left <address> --right <address> --role <role> [--framing <kind>] <file> <protocol>\n  \
+         tcpform conformance --connect <address> --role <role> [--udp|--tls|--unix|--websocket|--quic] [--listen] [--framing <kind>] [--json <file>] [--markdown <file>] [--junit <file>] <file> <protocol>\n  \
          tcpform platform <openapi-import|protobuf-import|proto-export|wireshark|scapy|schema-check|k8s-job|html-report|sarif|netem> ...\n  \
          tcpform run [--json] [--json-file <file>] [--diagram] [--pcap <file>] [--pcapng <file>] [--allow-plugins] <file> <protocol>\n  \
          tcpform run --live [--udp] --bind <address> <file> <protocol>\n  \
@@ -443,6 +445,161 @@ fn cmd_differential(args: &[String]) -> Result<(), String> {
         Ok(())
     } else {
         Err("differential implementations diverged".into())
+    }
+}
+
+fn cmd_conformance(args: &[String]) -> Result<(), String> {
+    let mut address = None;
+    let mut role = None;
+    let mut json_output = None;
+    let mut markdown_output = None;
+    let mut junit_output = None;
+    let mut framing = tcpform::Framing::Raw;
+    let mut tls_options = tcpform::TlsOptions::default();
+    let mut udp_options = tcpform::UdpOptions::default();
+    let mut websocket_options = tcpform::WebSocketOptions::default();
+    let mut udp = false;
+    let mut tls = false;
+    let mut unix = false;
+    let mut websocket = false;
+    let mut quic = false;
+    let mut listen = false;
+    let mut positional = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let value = |index: &mut usize, flag: &str| -> Result<String, String> {
+            *index += 1;
+            args.get(*index)
+                .cloned()
+                .ok_or_else(|| format!("{flag} requires a value"))
+        };
+        match args[index].as_str() {
+            "--connect" | "--address" => address = Some(value(&mut index, "--connect")?),
+            "--role" => role = Some(value(&mut index, "--role")?),
+            "--json" => json_output = Some(value(&mut index, "--json")?),
+            "--markdown" => markdown_output = Some(value(&mut index, "--markdown")?),
+            "--junit" => junit_output = Some(value(&mut index, "--junit")?),
+            "--framing" => framing = parse_framing(&value(&mut index, "--framing")?)?,
+            "--listen" => listen = true,
+            "--udp" => udp = true,
+            "--tls" => tls = true,
+            "--unix" => unix = true,
+            "--websocket" => websocket = true,
+            "--quic" => quic = true,
+            "--server-name" => tls_options.server_name = Some(value(&mut index, "--server-name")?),
+            "--ca" => tls_options.ca_file = Some(value(&mut index, "--ca")?),
+            "--tls-cert" => tls_options.cert_file = Some(value(&mut index, "--tls-cert")?),
+            "--tls-key" => tls_options.key_file = Some(value(&mut index, "--tls-key")?),
+            "--alpn" => tls_options
+                .alpn_protocols
+                .push(value(&mut index, "--alpn")?),
+            "--require-client-cert" => tls_options.require_client_auth = true,
+            "--broadcast" => udp_options.broadcast = true,
+            "--reuse-address" => udp_options.reuse_address = true,
+            "--multicast" => udp_options.multicast_group = Some(value(&mut index, "--multicast")?),
+            "--multicast-interface" => {
+                udp_options.multicast_interface = Some(value(&mut index, "--multicast-interface")?)
+            }
+            "--multicast-ttl" => {
+                udp_options.multicast_ttl = Some(
+                    value(&mut index, "--multicast-ttl")?
+                        .parse()
+                        .map_err(|_| "--multicast-ttl requires an integer")?,
+                )
+            }
+            "--websocket-text" => websocket_options.text = true,
+            "--websocket-protocol" => websocket_options
+                .subprotocols
+                .push(value(&mut index, "--websocket-protocol")?),
+            "--origin" => websocket_options.origin = Some(value(&mut index, "--origin")?),
+            option if option.starts_with('-') => {
+                return Err(format!("unknown conformance option `{option}`"));
+            }
+            value => positional.push(value.to_string()),
+        }
+        index += 1;
+    }
+    if positional.len() != 2 {
+        return Err("conformance requires <file> <protocol>".into());
+    }
+    if usize::from(udp)
+        + usize::from(tls)
+        + usize::from(unix)
+        + usize::from(websocket)
+        + usize::from(quic)
+        > 1
+    {
+        return Err("--udp, --tls, --unix, --websocket, and --quic are mutually exclusive".into());
+    }
+    if udp && framing != tcpform::Framing::Raw {
+        return Err("--framing is not used by UDP datagrams".into());
+    }
+    let address = address.ok_or("conformance requires --connect <address>")?;
+    let role = role.ok_or("conformance requires --role <role>")?;
+    let protocols = load(&positional[0])?;
+    let protocol = find(&protocols, &positional[1])?.clone();
+    let engine = Engine::new(protocol.clone()).map_err(|error| error.to_string())?;
+    let result = if quic {
+        engine.run_external_quic(&role, &address, listen, &tls_options)
+    } else if websocket {
+        engine.run_external_websocket(&role, &address, listen, &websocket_options)
+    } else if unix {
+        #[cfg(unix)]
+        {
+            engine.run_external_unix(&role, &address, listen, framing)
+        }
+        #[cfg(not(unix))]
+        {
+            return Err("--unix is only supported on Unix platforms".into());
+        }
+    } else if tls {
+        engine.run_external_tls(&role, &address, listen, framing, &tls_options)
+    } else if udp {
+        engine.run_external_udp_with_options(&role, &address, listen, &udp_options)
+    } else {
+        engine.run_external_tcp_framed(&role, &address, listen, framing)
+    };
+    let (trace, failure) = match result {
+        Ok(trace) => (trace, None),
+        Err(EngineError::Runtime {
+            kind,
+            message,
+            trace,
+            ..
+        }) => (trace, Some((kind.as_str().to_string(), message))),
+        Err(error) => return Err(error.to_string()),
+    };
+    let report = tcpform::conformance::build_report(
+        &protocol,
+        &role,
+        &address,
+        &trace,
+        failure
+            .as_ref()
+            .map(|(kind, message)| (kind.as_str(), message.as_str())),
+    );
+    let json = serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
+    if let Some(path) = json_output.as_deref() {
+        fs::write(path, &json).map_err(|error| format!("cannot write `{path}`: {error}"))?;
+    }
+    if let Some(path) = markdown_output.as_deref() {
+        fs::write(path, tcpform::conformance::markdown(&report))
+            .map_err(|error| format!("cannot write `{path}`: {error}"))?;
+    }
+    if let Some(path) = junit_output.as_deref() {
+        fs::write(path, tcpform::conformance::junit(&report))
+            .map_err(|error| format!("cannot write `{path}`: {error}"))?;
+    }
+    if json_output.is_none() && markdown_output.is_none() && junit_output.is_none() {
+        println!("{json}");
+    }
+    if report.status == "conformant" {
+        Ok(())
+    } else {
+        Err(format!(
+            "target `{address}` is nonconformant ({} passed, {} failed, {} not run)",
+            report.summary.passed, report.summary.failed, report.summary.not_run
+        ))
     }
 }
 

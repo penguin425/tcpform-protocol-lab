@@ -3734,3 +3734,84 @@ fn differential_cli_drives_two_external_implementations_with_the_same_protocol()
         .contains("\"equal\": false"));
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn conformance_cli_writes_reports_for_conformant_and_nonconformant_targets() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    fn server(response: &'static [u8]) -> (String, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 4];
+            stream.read_exact(&mut request).unwrap();
+            assert_eq!(&request, b"ping");
+            stream.write_all(response).unwrap();
+        });
+        (address, handle)
+    }
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!("tcpform-conformance-{unique}"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let source = directory.join("protocol.tcpf");
+    std::fs::write(
+        &source,
+        r#"protocol "service" {
+          step "send" { role="client" action="send" to="server" segment { payload="ping" } }
+          step "recv" { role="client" action="recv" depends_on=["send"] timer { timeout="2s" } expect { from="server" payload="pong" } }
+          step "peer" { role="server" action="log" }
+        }"#,
+    )
+    .unwrap();
+
+    for (response, conformant) in [(b"pong" as &'static [u8], true), (b"pang", false)] {
+        let (address, handle) = server(response);
+        let suffix = if conformant { "pass" } else { "fail" };
+        let json = directory.join(format!("{suffix}.json"));
+        let markdown = directory.join(format!("{suffix}.md"));
+        let junit = directory.join(format!("{suffix}.xml"));
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_tcpform"))
+            .args(["conformance", "--connect", &address, "--role", "client"])
+            .arg("--json")
+            .arg(&json)
+            .arg("--markdown")
+            .arg(&markdown)
+            .arg("--junit")
+            .arg(&junit)
+            .arg(&source)
+            .arg("service")
+            .output()
+            .unwrap();
+        handle.join().unwrap();
+        assert_eq!(
+            output.status.success(),
+            conformant,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&json).unwrap()).unwrap();
+        assert_eq!(
+            report["status"],
+            if conformant {
+                "conformant"
+            } else {
+                "nonconformant"
+            }
+        );
+        assert_eq!(report["summary"]["total"], 2);
+        assert!(std::fs::read_to_string(&markdown)
+            .unwrap()
+            .contains("protocol conformance report"));
+        assert!(std::fs::read_to_string(&junit)
+            .unwrap()
+            .contains("<testsuite"));
+    }
+    std::fs::remove_dir_all(directory).unwrap();
+}
