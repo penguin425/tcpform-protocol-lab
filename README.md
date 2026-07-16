@@ -83,6 +83,8 @@ tcpform template list                  # list built-in protocol templates
 tcpform template search mqtt           # search the configured external registry
 tcpform template add owner/mqtt        # verify, cache, and lock an external template
 tcpform schema dsl                     # print the machine-readable DSL schema
+tcpform platform wireshark protocol.tcpf demo 9000 > demo.lua
+tcpform platform scapy protocol.tcpf demo 9000 > demo_scapy.py
 tcpform snapshot protocol.tcpf         # create/check protocol.tcpf.snapshot.json
 tcpform snapshot --check protocol.tcpf # fail when behavior differs from Git
 tcpform snapshot --update protocol.tcpf # accept current behavior as baseline
@@ -213,6 +215,13 @@ tokens, formatting, code actions, and inlay hints. The VS Code extension in
 run/test CodeLens, an embedded Visualizer webview, and automatic local DSL v2
 JSON Schema generation. Configure `tcpform.executable` when the binary is not
 on `PATH`; run `npm install` before packaging or launching the extension host.
+
+`tcpform platform wireshark` exports a Lua dissector with a `ProtoField` for
+every declared `header_schema` field, including offsets, widths, display types,
+and little-endian integer handling. `tcpform platform scapy` exports equivalent
+Scapy `Packet` classes with explicit padding and TCP source/destination port
+bindings. Both outputs are deterministic and can be committed beside the DSL;
+review generated code before installing it into a privileged capture setup.
 
 The browser visualizer includes a Protocol workbench for boolean trace queries,
 LCS-aligned trace/header/payload diffs, generated fault variants, state-machine

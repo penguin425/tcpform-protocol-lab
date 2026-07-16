@@ -143,6 +143,34 @@ fn import_kaitai_cli_generates_valid_header_schema_and_warns_on_dynamic_fields()
 }
 
 #[test]
+fn protocol_exporters_emit_field_aware_wireshark_and_scapy_code() {
+    let binary = env!("CARGO_BIN_EXE_tcpform");
+    let source = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/examples/custom_header_schema.tcpf"
+    );
+    let run = |target: &str| {
+        std::process::Command::new(binary)
+            .args(["platform", target, source, "custom_header_demo", "19000"])
+            .output()
+            .unwrap()
+    };
+    let wireshark = run("wireshark");
+    assert!(wireshark.status.success());
+    let wireshark = String::from_utf8(wireshark.stdout).unwrap();
+    assert!(wireshark.contains("ProtoField.uint8"));
+    assert!(wireshark.contains("buffer(2, 2)"));
+    assert!(wireshark.contains("add(19000"));
+
+    let scapy = run("scapy");
+    assert!(scapy.status.success());
+    let scapy = String::from_utf8(scapy.stdout).unwrap();
+    assert!(scapy.contains("class CustomHeaderDemoAcme(Packet):"));
+    assert!(scapy.contains("BitField(\"version\""));
+    assert!(scapy.contains("dport=19000"));
+}
+
+#[test]
 fn snapshot_cli_creates_checks_rejects_changes_and_updates() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

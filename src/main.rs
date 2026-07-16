@@ -107,7 +107,7 @@ fn usage() {
          tcpform plugin <manifest.json> <action|matcher|decoder|report> <name> <input.json>\n  \
          tcpform tls-audit (--cert <file> | --connect <address> --server-name <name>) [--ca <file>] [--alpn <protocol>] [--warn-days <days>]\n  \
          tcpform differential --left <address> --right <address> --role <role> [--framing <kind>] <file> <protocol>\n  \
-         tcpform platform <openapi-import|protobuf-import|proto-export|wireshark|schema-check|k8s-job|html-report|sarif|netem> ...\n  \
+         tcpform platform <openapi-import|protobuf-import|proto-export|wireshark|scapy|schema-check|k8s-job|html-report|sarif|netem> ...\n  \
          tcpform run [--json] [--json-file <file>] [--diagram] [--pcap <file>] [--pcapng <file>] [--allow-plugins] <file> <protocol>\n  \
          tcpform run --live [--udp] --bind <address> <file> <protocol>\n  \
          tcpform run --external --role <role> [--udp|--tls|--unix|--websocket|--quic] [--listen] [--framing <kind>] [--alpn <protocol>] [--require-client-cert] --connect <address> <file> <protocol>\n  \
@@ -140,10 +140,10 @@ fn cmd_platform(args: &[String]) -> Result<(), String> {
             );
             Ok(())
         }
-        "proto-export" | "wireshark" => {
+        "proto-export" | "wireshark" | "scapy" => {
             let path = args
                 .get(1)
-                .ok_or("proto-export|wireshark <source> <protocol> [tcp-port]")?;
+                .ok_or("proto-export|wireshark|scapy <source> <protocol> [tcp-port]")?;
             let name = args.get(2).ok_or("protocol name required")?;
             let protocols = interpret(&load_blocks(path)?).map_err(|e| e.to_string())?;
             let protocol = find(&protocols, name)?;
@@ -156,7 +156,11 @@ fn cmd_platform(args: &[String]) -> Result<(), String> {
                     .unwrap_or("0")
                     .parse()
                     .map_err(|_| "invalid TCP port")?;
-                print!("{}", tcpform::platform::wireshark_lua(protocol, port));
+                if command == "wireshark" {
+                    print!("{}", tcpform::platform::wireshark_lua(protocol, port));
+                } else {
+                    print!("{}", tcpform::platform::scapy_python(protocol, port));
+                }
             }
             Ok(())
         }
