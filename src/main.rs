@@ -61,6 +61,7 @@ fn main() {
         "tls-audit" => cmd_tls_audit(&args[2..]),
         "differential" => cmd_differential(&args[2..]),
         "conformance" => cmd_conformance(&args[2..]),
+        "interop" => cmd_interop(&args[2..]),
         "platform" => cmd_platform(&args[2..]),
         "run" => cmd_run(&args[2..]),
         "test" => cmd_test(&args[2..]),
@@ -114,6 +115,7 @@ fn usage() {
          tcpform tls-audit (--cert <file> | --connect <address> --server-name <name>) [--ca <file>] [--alpn <protocol>] [--warn-days <days>]\n  \
          tcpform differential --left <address> --right <address> --role <role> [--framing <kind>] <file> <protocol>\n  \
          tcpform conformance --connect <address> --role <role> [--udp|--tls|--unix|--websocket|--quic] [--listen] [--framing <kind>] [--json <file>] [--markdown <file>] [--junit <file>] <file> <protocol>\n  \
+         tcpform interop --targets <implementations.json> --role <role> [--framing <kind>] [--json <file>] [--markdown <file>] [--junit <file>] <file> <protocol>\n  \
          tcpform platform <openapi-import|protobuf-import|proto-export|wireshark|scapy|schema-check|k8s-job|html-report|sarif|netem> ...\n  \
          tcpform run [--json] [--json-file <file>] [--diagram] [--pcap <file>] [--pcapng <file>] [--allow-plugins] <file> <protocol>\n  \
          tcpform run --live [--udp] --bind <address> <file> <protocol>\n  \
@@ -445,6 +447,95 @@ fn cmd_differential(args: &[String]) -> Result<(), String> {
         Ok(())
     } else {
         Err("differential implementations diverged".into())
+    }
+}
+
+fn cmd_interop(args: &[String]) -> Result<(), String> {
+    let mut targets = None;
+    let mut role = None;
+    let mut json_output = None;
+    let mut markdown_output = None;
+    let mut junit_output = None;
+    let mut framing = tcpform::Framing::Raw;
+    let mut positional = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let value = |index: &mut usize, flag: &str| -> Result<String, String> {
+            *index += 1;
+            args.get(*index)
+                .cloned()
+                .ok_or_else(|| format!("{flag} requires a value"))
+        };
+        match args[index].as_str() {
+            "--targets" => targets = Some(value(&mut index, "--targets")?),
+            "--role" => role = Some(value(&mut index, "--role")?),
+            "--framing" => framing = parse_framing(&value(&mut index, "--framing")?)?,
+            "--json" => json_output = Some(value(&mut index, "--json")?),
+            "--markdown" => markdown_output = Some(value(&mut index, "--markdown")?),
+            "--junit" => junit_output = Some(value(&mut index, "--junit")?),
+            option if option.starts_with('-') => {
+                return Err(format!("unknown interop option `{option}`"));
+            }
+            value => positional.push(value.to_string()),
+        }
+        index += 1;
+    }
+    if positional.len() != 2 {
+        return Err("interop requires <file> <protocol>".into());
+    }
+    let role = role.ok_or("interop requires --role <role>")?;
+    let targets = targets.ok_or("interop requires --targets <implementations.json>")?;
+    let config: tcpform::interoperability::InteroperabilityConfig = serde_json::from_str(
+        &fs::read_to_string(&targets)
+            .map_err(|error| format!("cannot read `{targets}`: {error}"))?,
+    )
+    .map_err(|error| format!("invalid interoperability config `{targets}`: {error}"))?;
+    tcpform::interoperability::validate_config(&config)?;
+    let protocols = load(&positional[0])?;
+    let protocol = find(&protocols, &positional[1])?.clone();
+    let mut runs = Vec::with_capacity(config.implementations.len());
+    for implementation in config.implementations {
+        let result = Engine::new(protocol.clone())
+            .map_err(|error| error.to_string())?
+            .run_external_tcp_framed(&role, &implementation.address, false, framing.clone());
+        let (trace, failure_kind, error) = match result {
+            Ok(trace) => (trace, None, None),
+            Err(EngineError::Runtime {
+                kind,
+                message,
+                trace,
+                ..
+            }) => (trace, Some(kind.as_str().to_string()), Some(message)),
+            Err(error) => return Err(error.to_string()),
+        };
+        runs.push(tcpform::interoperability::ImplementationRun {
+            name: implementation.name,
+            address: implementation.address,
+            trace,
+            failure_kind,
+            error,
+        });
+    }
+    let report = tcpform::interoperability::build_report(&protocol.name, &role, &runs);
+    let json = serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
+    if let Some(path) = json_output.as_deref() {
+        fs::write(path, &json).map_err(|error| format!("cannot write `{path}`: {error}"))?;
+    }
+    if let Some(path) = markdown_output.as_deref() {
+        fs::write(path, tcpform::interoperability::markdown(&report))
+            .map_err(|error| format!("cannot write `{path}`: {error}"))?;
+    }
+    if let Some(path) = junit_output.as_deref() {
+        fs::write(path, tcpform::interoperability::junit(&report))
+            .map_err(|error| format!("cannot write `{path}`: {error}"))?;
+    }
+    if json_output.is_none() && markdown_output.is_none() && junit_output.is_none() {
+        println!("{json}");
+    }
+    if report.status == "interoperable" {
+        Ok(())
+    } else {
+        Err("implementations are not interoperable".into())
     }
 }
 
