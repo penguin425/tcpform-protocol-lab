@@ -91,7 +91,8 @@ tcpform ci-report base.json result.json --markdown report.md
 tcpform doctor [--json] [project-directory] # diagnose host and project setup
 tcpform completion bash               # generate Bash completion
 tcpform completion zsh                # generate Zsh completion
-tcpform import-pcap capture.pcapng --protocol captured --output captured.tcpf
+tcpform import-pcap capture.pcapng --protocol captured --output captured.tcpf \
+  --analysis captured.inference.json
 tcpform list <file>                    # list protocols, steps, roles
 tcpform plan   <file> <protocol>       # show the resolved topological order
 tcpform run    <file> <protocol>       # simulate and print the event timeline
@@ -144,10 +145,15 @@ tcpform completion zsh > ~/.zfunc/_tcpform
 ```
 
 `tcpform import-pcap` accepts classic PCAP and PCAPNG captures with Ethernet or
-raw-IP link types. It groups IPv4/IPv6 TCP and UDP packets into sessions and
-generates roles, endpoint/header comments, timing delays, payload hex,
-send/receive steps, and a smoke case. Treat generated DSL as a reviewable
-starting point: captures may contain credentials or other sensitive payloads.
+raw-IP link types. It groups IPv4/IPv6 TCP and UDP packets into sessions,
+identifies the TCP initiator, infers per-role handshake/data/closing states, and
+uses repeated same-direction payloads to propose fixed and variable field
+boundaries as `header_schema` blocks. It also generates endpoint/header
+comments, timing delays, payload hex, send/receive steps, and a smoke case.
+`--analysis` writes the session states, inferred fields, confidence scores, and
+sample values as JSON for review or downstream tooling. Treat all inferred DSL
+and field boundaries as hypotheses: captures may be incomplete and may contain
+credentials or other sensitive payloads.
 
 `tcpform snapshot` stores packets, decoded headers, state transitions, case
 success rates, P95 latency, and the complete Visualizer manifest in readable

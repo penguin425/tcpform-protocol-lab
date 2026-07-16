@@ -61,6 +61,7 @@ fn import_pcap_cli_generates_valid_dsl_and_smoke_case() {
         .as_nanos();
     let capture = std::env::temp_dir().join(format!("tcpform-import-{unique}.pcapng"));
     let output = std::env::temp_dir().join(format!("tcpform-import-{unique}.tcpf"));
+    let analysis = std::env::temp_dir().join(format!("tcpform-import-{unique}.json"));
     let protocol = load_protocol(
         include_str!("../examples/tcp_handshake.tcpf"),
         "tcp_handshake",
@@ -72,6 +73,8 @@ fn import_pcap_cli_generates_valid_dsl_and_smoke_case() {
         .arg(&capture)
         .args(["--protocol", "captured_handshake", "--output"])
         .arg(&output)
+        .arg("--analysis")
+        .arg(&analysis)
         .output()
         .unwrap();
     assert!(
@@ -87,8 +90,18 @@ fn import_pcap_cli_generates_valid_dsl_and_smoke_case() {
         tcpform::model::interpret(&blocks).unwrap()[0].name,
         "captured_handshake"
     );
+    let inference: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&analysis).unwrap()).unwrap();
+    assert_eq!(inference["schema_version"], "1.0");
+    assert_eq!(inference["sessions"][0]["transport"], "tcp");
+    assert!(inference["sessions"][0]["states"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|state| state == "established"));
     std::fs::remove_file(capture).unwrap();
     std::fs::remove_file(output).unwrap();
+    std::fs::remove_file(analysis).unwrap();
 }
 
 #[test]

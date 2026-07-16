@@ -92,7 +92,7 @@ fn usage() {
          tcpform ci-report <baseline.json> <current.json> [--markdown <file>] [--json <file>] [--fail-on-regression]\n  \
          tcpform doctor [--json] [project-directory]\n  \
          tcpform completion <bash|zsh>\n  \
-         tcpform import-pcap <capture.pcap|capture.pcapng> --protocol <name> --output <file>\n  \
+         tcpform import-pcap <capture.pcap|capture.pcapng> --protocol <name> --output <file> [--analysis <report.json>]\n  \
          tcpform lsp\n  \
          tcpform gate <metrics.json> [--config <file>] [--profile <name>] [--baseline <file>] [--repeat <n>] [--markdown <file>] [--junit <file>] [--github]\n  \
          tcpform bundle --output <file> [--capture <file>] <source> <protocol>\n  \
@@ -737,6 +737,7 @@ fn cmd_import_pcap(args: &[String]) -> Result<(), String> {
     let mut input = None;
     let mut protocol = None;
     let mut output = None;
+    let mut analysis = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -752,6 +753,14 @@ fn cmd_import_pcap(args: &[String]) -> Result<(), String> {
                 index += 1;
                 output = Some(args.get(index).ok_or("--output requires a file")?.as_str());
             }
+            "--analysis" => {
+                index += 1;
+                analysis = Some(
+                    args.get(index)
+                        .ok_or("--analysis requires a JSON file")?
+                        .as_str(),
+                );
+            }
             value if value.starts_with('-') => {
                 return Err(format!("unknown import-pcap option `{value}`"));
             }
@@ -766,6 +775,13 @@ fn cmd_import_pcap(args: &[String]) -> Result<(), String> {
     let bytes = fs::read(input).map_err(|error| format!("cannot read `{input}`: {error}"))?;
     let source = tcpform::pcap_import::import_capture(&bytes, protocol)?;
     fs::write(output, source).map_err(|error| format!("cannot write `{output}`: {error}"))?;
+    if let Some(path) = analysis {
+        let report = tcpform::pcap_import::analyze_capture(&bytes)?;
+        let document = serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
+        fs::write(path, format!("{document}\n"))
+            .map_err(|error| format!("cannot write `{path}`: {error}"))?;
+        println!("generated {path}");
+    }
     println!("generated {output}");
     Ok(())
 }
