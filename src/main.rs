@@ -46,6 +46,7 @@ fn main() {
         "completion" => cmd_completion(&args[2..]),
         "import-pcap" => cmd_import_pcap(&args[2..]),
         "import-kaitai" => cmd_import_kaitai(&args[2..]),
+        "packetdrill" => cmd_packetdrill(&args[2..]),
         "lsp" => cmd_lsp(),
         "gate" => cmd_gate(&args[2..]),
         "bundle" => cmd_bundle(&args[2..]),
@@ -96,6 +97,8 @@ fn usage() {
          tcpform completion <bash|zsh>\n  \
          tcpform import-pcap <capture.pcap|capture.pcapng> --protocol <name> --output <file> [--analysis <report.json>]\n  \
          tcpform import-kaitai <schema.ksy> --output <file> [--protocol <name>]\n  \
+         tcpform packetdrill export <source> <protocol> --local-role <role> --output <file.pkt>\n  \
+         tcpform packetdrill import <file.pkt> --protocol <name> --local-role <role> --peer-role <role> --output <file.tcpf>\n  \
          tcpform lsp\n  \
          tcpform gate <metrics.json> [--config <file>] [--profile <name>] [--baseline <file>] [--repeat <n>] [--markdown <file>] [--junit <file>] [--github]\n  \
          tcpform bundle --output <file> [--capture <file>] <source> <protocol>\n  \
@@ -892,6 +895,77 @@ fn cmd_import_kaitai(args: &[String]) -> Result<(), String> {
     }
     println!("generated {output}");
     Ok(())
+}
+
+fn cmd_packetdrill(args: &[String]) -> Result<(), String> {
+    let action = args
+        .first()
+        .map(String::as_str)
+        .ok_or("packetdrill requires import or export")?;
+    match action {
+        "export" => {
+            let source = args.get(1).ok_or("packetdrill export requires a source")?;
+            let name = args
+                .get(2)
+                .ok_or("packetdrill export requires a protocol")?;
+            let options = key_value_options(&args[3..])?;
+            let role = options
+                .get("--local-role")
+                .ok_or("packetdrill export requires --local-role")?;
+            let output = options
+                .get("--output")
+                .ok_or("packetdrill export requires --output")?;
+            let protocols = interpret(&load_blocks(source)?).map_err(|error| error.to_string())?;
+            let protocol = find(&protocols, name)?;
+            fs::write(output, tcpform::packetdrill::export(protocol, role)?)
+                .map_err(|error| format!("cannot write `{output}`: {error}"))?;
+            println!("generated {output}");
+            Ok(())
+        }
+        "import" => {
+            let source = args
+                .get(1)
+                .ok_or("packetdrill import requires a .pkt file")?;
+            let options = key_value_options(&args[2..])?;
+            let protocol = options
+                .get("--protocol")
+                .ok_or("packetdrill import requires --protocol")?;
+            let local = options
+                .get("--local-role")
+                .ok_or("packetdrill import requires --local-role")?;
+            let peer = options
+                .get("--peer-role")
+                .ok_or("packetdrill import requires --peer-role")?;
+            let output = options
+                .get("--output")
+                .ok_or("packetdrill import requires --output")?;
+            let source = fs::read_to_string(source).map_err(|error| error.to_string())?;
+            let imported = tcpform::packetdrill::import(&source, protocol, local, peer)?;
+            fs::write(output, imported.dsl).map_err(|error| error.to_string())?;
+            for warning in imported.warnings {
+                eprintln!("warning: {warning}");
+            }
+            println!("generated {output}");
+            Ok(())
+        }
+        value => Err(format!("unknown packetdrill action `{value}`")),
+    }
+}
+
+fn key_value_options(args: &[String]) -> Result<HashMap<&str, &str>, String> {
+    if !args.len().is_multiple_of(2) {
+        return Err(format!("{} requires a value", args.last().unwrap()));
+    }
+    let mut options = HashMap::new();
+    for pair in args.chunks_exact(2) {
+        if !pair[0].starts_with("--") {
+            return Err(format!("unexpected argument `{}`", pair[0]));
+        }
+        if options.insert(pair[0].as_str(), pair[1].as_str()).is_some() {
+            return Err(format!("duplicate option `{}`", pair[0]));
+        }
+    }
+    Ok(options)
 }
 
 fn cmd_list(args: &[String]) -> Result<(), String> {

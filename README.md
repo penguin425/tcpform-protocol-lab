@@ -96,6 +96,9 @@ tcpform completion zsh                # generate Zsh completion
 tcpform import-pcap capture.pcapng --protocol captured --output captured.tcpf \
   --analysis captured.inference.json
 tcpform import-kaitai telemetry.ksy --output telemetry.tcpf
+tcpform packetdrill export protocol.tcpf demo --local-role client --output demo.pkt
+tcpform packetdrill import demo.pkt --protocol demo --local-role client \
+  --peer-role server --output demo.tcpf
 tcpform list <file>                    # list protocols, steps, roles
 tcpform plan   <file> <protocol>       # show the resolved topological order
 tcpform run    <file> <protocol>       # simulate and print the event timeline
@@ -167,6 +170,16 @@ than eight bytes are split to respect tcpform's decoder limits. Conditional,
 repeated, expression-sized, user-defined, and end-of-stream fields produce
 explicit warnings because their offsets cannot be represented safely in a
 static header schema. The generated protocol includes a runnable smoke case.
+
+`tcpform packetdrill export` converts ordered TCP/UDP send steps into
+packetdrill packet events relative to `--local-role`, preserving flags,
+sequence/acknowledgement numbers, windows, payload lengths, and delays.
+`packetdrill import` converts supported packet events back into runnable paired
+send/receive steps. Socket system calls, commands, TCP options, timing ranges,
+and unsupported encapsulations are reported with line numbers rather than
+silently changing their meaning. Imports preserve the declared application
+length as `payload_len`, but cannot recover payload contents because
+packetdrill packet events contain lengths rather than application bytes.
 
 `tcpform snapshot` stores packets, decoded headers, state transitions, case
 success rates, P95 latency, and the complete Visualizer manifest in readable
