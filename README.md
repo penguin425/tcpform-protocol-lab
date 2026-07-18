@@ -141,6 +141,9 @@ tcpform gate metrics.json --min-success-rate 1 --max-p95-us 50000
 tcpform orchestrate scenario.json [--dry-run]
 tcpform observe trace.json --ebpf kernel.jsonl --start-unix-ns 1700000000000000000 \
   --service-name demo --output otlp.json
+tcpform standards ttcn3-export protocol.tcpf demo --output demo.ttcn3
+tcpform standards ttcn3-import demo.ttcn3 --protocol demo --output demo.tcpf
+tcpform standards asn1-import messages.asn1 --type Message --protocol demo --output demo.tcpf
 tcpform proxy --listen 127.0.0.1:8443 --upstream service:443 \
   --tls-cert proxy.pem --tls-key proxy-key.pem --tls-upstream \
   --ca upstream-ca.pem --server-name service
@@ -169,6 +172,23 @@ Unix time explicitly, making exports deterministic and suitable for an OTLP
 collector, Jaeger, Tempo, or another OpenTelemetry backend. tcpform consumes
 collector output but does not load privileged eBPF programs or change kernel
 settings itself.
+
+### TTCN-3 and ASN.1 exchange
+
+`standards ttcn3-export` creates a readable TTCN-3 module and embeds compact
+`tcpform-step` annotations beside each send, receive, or log statement. These
+annotations preserve the supported tcpform step subset for deterministic
+re-import; `ttcn3-import` refuses unannotated TTCN-3 instead of guessing its
+concurrent behavior, verdict logic, adapters, or external functions.
+
+`standards asn1-import` converts one selected `SEQUENCE` into a tcpform
+`header_schema` only when every field has an unambiguous fixed width. Supported
+fields are constrained non-negative `INTEGER`, `BOOLEAN`, explicitly numbered
+`ENUMERATED`, exact `OCTET STRING (SIZE(n))`, and `IA5String (SIZE(n))`.
+Optional/default fields, UTF-8 character counts, unconstrained integers and
+variable sizes fail with a field-specific diagnostic. The result is explicitly
+labeled a fixed-width projection—not BER, DER, CER, or PER—so it cannot be
+mistaken for an ASN.1 encoding-rule implementation.
 
 `tcpform interop` drives two or more named TCP implementations with the same
 DSL role, records failures without stopping the remaining runs, and compares

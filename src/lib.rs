@@ -64,6 +64,7 @@ pub mod primitives;
 pub mod raw_socket;
 pub mod snapshot;
 pub mod spec_traceability;
+pub mod standards;
 pub mod storage;
 pub mod template_registry;
 pub mod templates;

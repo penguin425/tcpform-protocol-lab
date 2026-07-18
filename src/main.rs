@@ -58,6 +58,7 @@ fn main() {
         "explore" => cmd_explore(&args[2..]),
         "model-check" => cmd_model_check(&args[2..]),
         "observe" => cmd_observe(&args[2..]),
+        "standards" => cmd_standards(&args[2..]),
         "generate-faults" => cmd_generate_faults(&args[2..]),
         "fuzz" => cmd_native_fuzz(&args[2..]),
         "fuzz-export" => cmd_fuzz_export(&args[2..]),
@@ -119,6 +120,7 @@ fn usage() {
          tcpform explore <source> <protocol>\n  \
          tcpform model-check <source> <protocol> [--max-states <n>] [--output <report.json>] [--fail-on-violation]\n  \
          tcpform observe <trace.json> --output <otlp.json> --start-unix-ns <n> [--ebpf <events.jsonl>] [--service-name <name>] [--correlation-window-ns <n>]\n  \
+         tcpform standards <ttcn3-export|ttcn3-import|asn1-import> ...\n  \
          tcpform generate-faults --output <directory> <source>\n  \
          tcpform fuzz <source> <protocol> --role <role> --connect <address> --output <directory> [--iterations <n>] [--seed <n>] [--framing <kind>] [--coverage-file <path>] [--max-input-bytes <n>] [--stop-on-crash]\n  \
          tcpform fuzz-export <boofuzz|aflnet> <source> <protocol> --role <role> --output <path> [--host <host> --port <port>]\n  \
@@ -3664,6 +3666,63 @@ fn cmd_observe(args: &[String]) -> Result<(), String> {
         ),
     )
     .map_err(|error| error.to_string())
+}
+
+fn cmd_standards(args: &[String]) -> Result<(), String> {
+    let command = args
+        .first()
+        .map(String::as_str)
+        .ok_or("standards requires ttcn3-export, ttcn3-import, or asn1-import")?;
+    let value_after = |flag: &str| -> Result<Option<&str>, String> {
+        args.iter()
+            .position(|value| value == flag)
+            .map(|index| {
+                args.get(index + 1)
+                    .map(String::as_str)
+                    .ok_or_else(|| format!("{flag} requires a value"))
+            })
+            .transpose()
+    };
+    match command {
+        "ttcn3-export" => {
+            let source = args.get(1).ok_or(
+                "usage: tcpform standards ttcn3-export <source> <protocol> --output <file.ttcn3>",
+            )?;
+            let protocol = args.get(2).ok_or("ttcn3-export requires a protocol")?;
+            let output = value_after("--output")?.ok_or("ttcn3-export requires --output")?;
+            let protocols = load(source)?;
+            fs::write(
+                output,
+                tcpform::standards::export_ttcn3(find(&protocols, protocol)?)?,
+            )
+            .map_err(|error| error.to_string())
+        }
+        "ttcn3-import" => {
+            let source = args.get(1).ok_or("usage: tcpform standards ttcn3-import <file.ttcn3> --protocol <name> --output <file.tcpf>")?;
+            let protocol = value_after("--protocol")?.ok_or("ttcn3-import requires --protocol")?;
+            let output = value_after("--output")?.ok_or("ttcn3-import requires --output")?;
+            let imported = tcpform::standards::import_ttcn3(
+                &fs::read_to_string(source).map_err(|error| error.to_string())?,
+                protocol,
+            )?;
+            fs::write(output, imported.dsl).map_err(|error| error.to_string())
+        }
+        "asn1-import" => {
+            let source = args.get(1).ok_or("usage: tcpform standards asn1-import <file.asn1> [--type <name>] --protocol <name> --output <file.tcpf>")?;
+            let protocol = value_after("--protocol")?.ok_or("asn1-import requires --protocol")?;
+            let output = value_after("--output")?.ok_or("asn1-import requires --output")?;
+            let imported = tcpform::standards::import_asn1(
+                &fs::read_to_string(source).map_err(|error| error.to_string())?,
+                value_after("--type")?,
+                protocol,
+            )?;
+            for warning in imported.warnings {
+                eprintln!("warning: {warning}");
+            }
+            fs::write(output, imported.dsl).map_err(|error| error.to_string())
+        }
+        other => Err(format!("unknown standards subcommand `{other}`")),
+    }
 }
 
 fn cmd_generate_faults(args: &[String]) -> Result<(), String> {
