@@ -71,11 +71,41 @@ pub struct HeaderSchema {
 #[derive(Debug, Clone)]
 pub struct HeaderFieldSpec {
     pub name: String,
+    /// Stable declaration order for sequential dynamic layouts. Fixed-offset
+    /// legacy layouts continue to be ordered by offset.
+    pub order: usize,
     pub offset: usize,
+    /// Whether `offset` was explicitly supplied. Dynamic fields without an
+    /// explicit offset start immediately after the preceding field.
+    pub offset_explicit: bool,
     pub length: usize,
+    /// Resolve the byte length from an earlier decoded field.
+    pub length_from: Option<String>,
+    pub length_adjust: i64,
+    /// Decode the field repeatedly, either a fixed number of times or from an
+    /// earlier decoded field.
+    pub repeat: usize,
+    pub repeat_from: Option<String>,
+    /// Optional terminator byte sequence (hex) for variable strings/bytes.
+    pub terminator: Option<Vec<u8>>,
+    /// A small, deterministic predicate over previously decoded fields.
+    pub when: Option<String>,
     pub bit_offset: u8,
     pub bits: u8,
     pub format: String,
+    pub enum_values: HashMap<String, Value>,
+    /// Nested fields are decoded within this field's byte range.
+    pub fields: Vec<HeaderFieldSpec>,
+    /// Tagged-union alternatives selected by `switch_on`.
+    pub switch_on: Option<String>,
+    pub cases: HashMap<String, Vec<HeaderFieldSpec>>,
+    /// Optional reversible content transformation (`zlib` or `plugin:<name>`).
+    pub transform: Option<String>,
+    pub key_from: Option<String>,
+    pub nonce_from: Option<String>,
+    /// Optional checksum algorithm covering `checksum_range`.
+    pub checksum: Option<String>,
+    pub checksum_range: Option<String>,
 }
 
 /// One composable unit of a protocol.
@@ -917,54 +947,8 @@ fn interpret_header_schema(b: &Block) -> Result<HeaderSchema, ModelError> {
         }
         None => return Err(err(format!("header_schema `{name}` requires fields"))),
     };
-    let mut fields = Vec::new();
-    for (field_name, value) in values {
-        let object = match value {
-            Value::Object(object) => object,
-            _ => {
-                return Err(err(format!(
-                    "header_schema `{name}` field `{field_name}` must be an object"
-                )))
-            }
-        };
-        for key in object.keys() {
-            if !matches!(
-                key.as_str(),
-                "offset" | "length" | "bit_offset" | "bits" | "format"
-            ) {
-                return Err(err(format!(
-                    "header_schema `{name}` field `{field_name}` has unknown attribute `{key}`"
-                )));
-            }
-        }
-        let context = format!("header_schema `{name}` field `{field_name}`");
-        let field_offset = usize::try_from(optional_u64(object, &context, "offset", 0)?)
-            .map_err(|_| err(format!("{context} offset is too large")))?;
-        let length = optional_usize(object, &context, "length", 1)?;
-        if length == 0 || length > 8 {
-            return Err(err(format!("{context} length must be 1..=8")));
-        }
-        let bit_offset = optional_u64(object, &context, "bit_offset", 0)?;
-        let bits = optional_u64(object, &context, "bits", (length * 8) as u64)?;
-        if bit_offset > 7 || bits == 0 || bits > 64 || bit_offset + bits > (length * 8) as u64 {
-            return Err(err(format!("{context} bit range exceeds its byte length")));
-        }
-        let format = optional_string(object, &context, "format")?.unwrap_or_else(|| "uint".into());
-        if !matches!(format.as_str(), "uint" | "hex" | "ascii" | "ipv4") {
-            return Err(err(format!(
-                "{context} format must be uint, hex, ascii, or ipv4"
-            )));
-        }
-        fields.push(HeaderFieldSpec {
-            name: field_name.clone(),
-            offset: field_offset,
-            length,
-            bit_offset: bit_offset as u8,
-            bits: bits as u8,
-            format,
-        });
-    }
-    fields.sort_by_key(|field| (field.offset, field.bit_offset));
+    let mut fields = parse_header_fields(values, &format!("header_schema `{name}`"))?;
+    sort_header_fields(&mut fields);
     if fields.is_empty() {
         return Err(err(format!(
             "header_schema `{name}` requires at least one field"
@@ -976,6 +960,215 @@ fn interpret_header_schema(b: &Block) -> Result<HeaderSchema, ModelError> {
         endian,
         fields,
     })
+}
+
+fn parse_header_fields(
+    values: &HashMap<String, Value>,
+    parent: &str,
+) -> Result<Vec<HeaderFieldSpec>, ModelError> {
+    let mut fields = Vec::new();
+    for (field_name, value) in values {
+        let object = match value {
+            Value::Object(object) => object,
+            _ => {
+                return Err(err(format!(
+                    "{parent} field `{field_name}` must be an object"
+                )))
+            }
+        };
+        for key in object.keys() {
+            if !matches!(
+                key.as_str(),
+                "offset"
+                    | "order"
+                    | "length"
+                    | "length_from"
+                    | "length_adjust"
+                    | "repeat"
+                    | "repeat_from"
+                    | "terminator"
+                    | "when"
+                    | "bit_offset"
+                    | "bits"
+                    | "format"
+                    | "enum"
+                    | "fields"
+                    | "switch_on"
+                    | "cases"
+                    | "transform"
+                    | "key_from"
+                    | "nonce_from"
+                    | "checksum"
+                    | "checksum_range"
+            ) {
+                return Err(err(format!(
+                    "{parent} field `{field_name}` has unknown attribute `{key}`"
+                )));
+            }
+        }
+        let context = format!("{parent} field `{field_name}`");
+        let order = optional_usize(object, &context, "order", usize::MAX)?;
+        let offset_explicit = object.contains_key("offset");
+        let field_offset = usize::try_from(optional_u64(object, &context, "offset", 0)?)
+            .map_err(|_| err(format!("{context} offset is too large")))?;
+        let length = optional_usize(object, &context, "length", 1)?;
+        if length == 0 {
+            return Err(err(format!("{context} length must be positive")));
+        }
+        let length_from = optional_string(object, &context, "length_from")?;
+        let length_adjust = object
+            .get("length_adjust")
+            .map(|value| {
+                value
+                    .as_i64()
+                    .ok_or_else(|| err(format!("{context} length_adjust must be an integer")))
+            })
+            .transpose()?
+            .unwrap_or(0);
+        let repeat = optional_usize(object, &context, "repeat", 1)?;
+        if repeat == 0 {
+            return Err(err(format!("{context} repeat must be positive")));
+        }
+        let repeat_from = optional_string(object, &context, "repeat_from")?;
+        if repeat_from.is_some() && object.contains_key("repeat") {
+            return Err(err(format!(
+                "{context} cannot use repeat and repeat_from together"
+            )));
+        }
+        let terminator = optional_string(object, &context, "terminator")?
+            .map(|value| {
+                crate::value::parse_hex(&value)
+                    .map_err(|error| err(format!("{context} terminator: {error}")))
+            })
+            .transpose()?;
+        if terminator.as_ref().is_some_and(Vec::is_empty) {
+            return Err(err(format!("{context} terminator cannot be empty")));
+        }
+        let when = optional_string(object, &context, "when")?;
+        let bit_offset = optional_u64(object, &context, "bit_offset", 0)?;
+        let bits = optional_u64(object, &context, "bits", (length * 8).min(64) as u64)?;
+        if bit_offset > 7 || bits == 0 || bits > 64 || bit_offset + bits > (length * 8) as u64 {
+            return Err(err(format!("{context} bit range exceeds its byte length")));
+        }
+        let format = optional_string(object, &context, "format")?.unwrap_or_else(|| {
+            if object.contains_key("fields")
+                || object.contains_key("cases")
+                || object.contains_key("transform")
+                || length > 8
+            {
+                "bytes".into()
+            } else {
+                "uint".into()
+            }
+        });
+        if !matches!(
+            format.as_str(),
+            "uint" | "int" | "hex" | "bytes" | "ascii" | "utf8" | "ipv4" | "bool"
+        ) {
+            return Err(err(format!("{context} has unsupported format `{format}`")));
+        }
+        if matches!(format.as_str(), "uint" | "int" | "bool" | "ipv4") && length > 8 {
+            return Err(err(format!("{context} numeric length must be 1..=8")));
+        }
+        let enum_values = match object.get("enum") {
+            Some(Value::Object(values)) => values.clone(),
+            Some(value) => return Err(type_error(&context, "enum", "an object", value)),
+            None => HashMap::new(),
+        };
+        let nested = match object.get("fields") {
+            Some(Value::Object(values)) => parse_header_fields(values, &context)?,
+            Some(value) => return Err(type_error(&context, "fields", "an object", value)),
+            None => Vec::new(),
+        };
+        let switch_on = optional_string(object, &context, "switch_on")?;
+        let mut cases = HashMap::new();
+        match object.get("cases") {
+            Some(Value::Object(values)) => {
+                for (selector, case) in values {
+                    let case_fields = match case {
+                        Value::Object(case) => match case.get("fields") {
+                            Some(Value::Object(fields)) => fields,
+                            _ => case,
+                        },
+                        value => return Err(type_error(&context, "cases", "an object", value)),
+                    };
+                    cases.insert(
+                        selector.clone(),
+                        parse_header_fields(case_fields, &format!("{context} case `{selector}`"))?,
+                    );
+                }
+            }
+            Some(value) => return Err(type_error(&context, "cases", "an object", value)),
+            None => {}
+        }
+        if switch_on.is_some() != !cases.is_empty() {
+            return Err(err(format!(
+                "{context} switch_on and cases must be supplied together"
+            )));
+        }
+        let transform = optional_string(object, &context, "transform")?;
+        if transform.as_ref().is_some_and(|value| {
+            value != "zlib" && value != "aes-gcm" && !value.starts_with("plugin:")
+        }) {
+            return Err(err(format!(
+                "{context} transform must be zlib, aes-gcm, or plugin:<name>"
+            )));
+        }
+        let key_from = optional_string(object, &context, "key_from")?;
+        let nonce_from = optional_string(object, &context, "nonce_from")?;
+        if transform.as_deref() == Some("aes-gcm") && (key_from.is_none() || nonce_from.is_none()) {
+            return Err(err(format!(
+                "{context} aes-gcm requires key_from and nonce_from"
+            )));
+        }
+        let checksum = optional_string(object, &context, "checksum")?;
+        if checksum
+            .as_ref()
+            .is_some_and(|value| !matches!(value.as_str(), "crc16" | "crc32" | "internet"))
+        {
+            return Err(err(format!(
+                "{context} checksum must be crc16, crc32, or internet"
+            )));
+        }
+        let checksum_range = optional_string(object, &context, "checksum_range")?;
+        fields.push(HeaderFieldSpec {
+            name: field_name.clone(),
+            order,
+            offset: field_offset,
+            offset_explicit,
+            length,
+            length_from,
+            length_adjust,
+            repeat,
+            repeat_from,
+            terminator,
+            when,
+            bit_offset: bit_offset as u8,
+            bits: bits as u8,
+            format,
+            enum_values,
+            fields: nested,
+            switch_on,
+            cases,
+            transform,
+            key_from,
+            nonce_from,
+            checksum,
+            checksum_range,
+        });
+    }
+    sort_header_fields(&mut fields);
+    Ok(fields)
+}
+
+fn sort_header_fields(fields: &mut [HeaderFieldSpec]) {
+    fields.sort_by_key(|field| {
+        if field.order != usize::MAX {
+            (0, field.order, field.bit_offset as usize)
+        } else {
+            (1, field.offset, field.bit_offset as usize)
+        }
+    });
 }
 
 fn interpret_transport_config(b: &Block) -> Result<TransportConfig, ModelError> {

@@ -92,6 +92,8 @@ fn usage() {
          tcpform init [directory] [--name <name>] [--template <name>] [--force]\n  \
          tcpform template <list|show <name>|search <query>|add <owner/name>> [--registry <file>]\n  \
          tcpform schema dsl [--output <file>]\n  \
+         tcpform schema decode <source> <protocol> <schema> --hex <bytes>\n  \
+         tcpform schema encode <source> <protocol> <schema> --values <values.json>\n  \
          tcpform snapshot [--check|--update] [--output <file>] [--latency-tolerance-us <n>] <source> [protocol]\n  \
          tcpform ci-snapshot --output <file> <source> [protocol]\n  \
          tcpform ci-report <baseline.json> <current.json> [--markdown <file>] [--json <file>] [--fail-on-regression]\n  \
@@ -829,16 +831,76 @@ fn template_registry_path(
 }
 
 fn cmd_schema(args: &[String]) -> Result<(), String> {
-    if args.first().map(String::as_str) != Some("dsl") {
-        return Err("usage: tcpform schema dsl [--output <file>]".into());
-    }
-    let rendered = serde_json::to_string_pretty(&tcpform::compat::dsl_json_schema())
-        .map_err(|error| error.to_string())?;
-    if let Some(position) = args.iter().position(|arg| arg == "--output") {
-        let path = args.get(position + 1).ok_or("--output requires a file")?;
-        fs::write(path, format!("{rendered}\n")).map_err(|error| error.to_string())?;
-    } else {
-        println!("{rendered}");
+    match args.first().map(String::as_str) {
+        Some("dsl") => {
+            let rendered = serde_json::to_string_pretty(&tcpform::compat::dsl_json_schema())
+                .map_err(|error| error.to_string())?;
+            if let Some(position) = args.iter().position(|arg| arg == "--output") {
+                let path = args.get(position + 1).ok_or("--output requires a file")?;
+                fs::write(path, format!("{rendered}\n")).map_err(|error| error.to_string())?;
+            } else {
+                println!("{rendered}");
+            }
+        }
+        Some(command @ ("decode" | "encode")) => {
+            let source = args
+                .get(1)
+                .ok_or("schema decode|encode requires a source")?;
+            let protocol_name = args
+                .get(2)
+                .ok_or("schema decode|encode requires a protocol")?;
+            let schema_name = args
+                .get(3)
+                .ok_or("schema decode|encode requires a schema")?;
+            let protocols = interpret(&load_blocks(source)?).map_err(|error| error.to_string())?;
+            let protocol = find(&protocols, protocol_name)?;
+            let schema = protocol
+                .header_schemas
+                .iter()
+                .find(|schema| schema.name == *schema_name)
+                .ok_or_else(|| format!("unknown header schema `{schema_name}`"))?;
+            if command == "decode" {
+                let position = args
+                    .iter()
+                    .position(|arg| arg == "--hex")
+                    .ok_or("schema decode requires --hex <bytes>")?;
+                let bytes =
+                    tcpform::parse_hex(args.get(position + 1).ok_or("--hex requires bytes")?)?;
+                let decoded =
+                    tcpform::decode_schema(schema, &bytes).map_err(|error| error.to_string())?;
+                let document = serde_json::json!({
+                    "fields":decoded.fields.iter().map(|(key,value)|(key.clone(),tcpform::plugin::dsl_value_to_json(value))).collect::<serde_json::Map<_,_>>(),
+                    "checksum_valid":decoded.checksum_valid,
+                    "consumed":decoded.consumed,
+                    "unknown_hex":tcpform::bytes_to_hex(&decoded.unknown),
+                });
+                println!("{}", serde_json::to_string_pretty(&document).unwrap());
+            } else {
+                let position = args
+                    .iter()
+                    .position(|arg| arg == "--values")
+                    .ok_or("schema encode requires --values <values.json>")?;
+                let path = args.get(position + 1).ok_or("--values requires a file")?;
+                let json: serde_json::Value = serde_json::from_str(
+                    &fs::read_to_string(path).map_err(|error| error.to_string())?,
+                )
+                .map_err(|error| error.to_string())?;
+                let values = json
+                    .as_object()
+                    .ok_or("values JSON must be an object")?
+                    .iter()
+                    .map(|(key, value)| (key.clone(), tcpform::plugin::json_to_dsl_value(value)))
+                    .collect();
+                println!(
+                    "{}",
+                    tcpform::bytes_to_hex(
+                        &tcpform::encode_schema(schema, &values)
+                            .map_err(|error| error.to_string())?
+                    )
+                );
+            }
+        }
+        _ => return Err("usage: tcpform schema <dsl|decode|encode> ...".into()),
     }
     Ok(())
 }

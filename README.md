@@ -83,6 +83,8 @@ tcpform template list                  # list built-in protocol templates
 tcpform template search mqtt           # search the configured external registry
 tcpform template add owner/mqtt        # verify, cache, and lock an external template
 tcpform schema dsl                     # print the machine-readable DSL schema
+tcpform schema decode protocol.tcpf demo message --hex 010003616263...
+tcpform schema encode protocol.tcpf demo message --values message.json
 tcpform platform wireshark protocol.tcpf demo 9000 > demo.lua
 tcpform platform scapy protocol.tcpf demo 9000 > demo_scapy.py
 tcpform snapshot protocol.tcpf         # create/check protocol.tcpf.snapshot.json
@@ -779,8 +781,33 @@ header_schema "acme" {
 ```
 
 `offset` and `length` are byte based. `bit_offset` is counted from the least
-significant bit; `bits` selects up to 64 bits. Supported formats are `uint`,
-`hex`, `ascii`, and `ipv4`. See `examples/custom_header_schema.tcpf`.
+significant bit; `bits` selects up to 64 bits. Fixed layouts support `uint`,
+`int`, `bool`, `hex`, `bytes`, `ascii`, `utf8`, and `ipv4` values. See
+`examples/custom_header_schema.tcpf`.
+
+Dynamic message schemas derive lengths and repetition counts from fields
+decoded earlier in the message. Give sequential fields an explicit `order`;
+legacy fixed layouts continue to use byte `offset` values. Fields support
+`length_from`, `length_adjust`, `repeat`, `repeat_from`, hex terminators,
+boolean `when` predicates, enums, nested `fields`, tagged `switch_on`/`cases`,
+zlib and AES-256-GCM regions, and CRC16, CRC32, or Internet checksums. AES-GCM
+keys and 12-byte nonces are referenced through `key_from` and `nonce_from` and
+may be supplied out of band through `decode_schema_with_context`. Unknown
+trailing bytes are preserved by the decoder instead of being discarded.
+
+```text
+header_schema "message" {
+  fields = {
+    payload_length = { order=1 length=2 format="uint" }
+    payload = { order=2 length_from="payload_length" format="bytes" }
+    crc = { order=3 length=4 checksum="crc32" checksum_range="all_before" }
+  }
+}
+```
+
+The Rust `decode_schema` and `encode_schema` APIs provide the same
+bidirectional codec used by `tcpform schema decode|encode`. See
+`examples/dynamic_message_schema.tcpf` for a complete schema.
 
 ### Capture and `${var}` interpolation
 

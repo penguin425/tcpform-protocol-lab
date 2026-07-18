@@ -151,9 +151,37 @@ pub fn visualization_manifest_with_case_traces(
         "transport":protocol.transport.as_ref().map(|t|json!({"loss_rate":t.loss_rate,"delay_ms":t.delay_ms,"reorder":t.reorder,"seed":t.seed,"disconnect_nth":t.disconnect_nth,"delay_spike_nth":t.delay_spike_nth,"delay_spike_ms":t.delay_spike_ms,"mtu":t.mtu,"mtu_blackhole":t.mtu_blackhole,"port_capacity":t.port_capacity,"nat_source_ip":t.nat_source_ip,"nat_source_port":t.nat_source_port})),
         "header_schemas":protocol.header_schemas.iter().map(|schema| json!({
             "name":schema.name,"offset":schema.offset,"endian":schema.endian,
-            "fields":schema.fields.iter().map(|field|json!({"name":field.name,"offset":field.offset,"length":field.length,"bit_offset":field.bit_offset,"bits":field.bits,"format":field.format})).collect::<Vec<_>>()
+            "fields":schema.fields.iter().map(header_field_json).collect::<Vec<_>>()
         })).collect::<Vec<_>>(),
     })).expect("visualization manifest is serializable")
+}
+
+fn header_field_json(field: &crate::model::HeaderFieldSpec) -> serde_json::Value {
+    json!({
+        "name":field.name,
+        "order":(field.order != usize::MAX).then_some(field.order),
+        "offset":field.offset,
+        "offset_explicit":field.offset_explicit,
+        "length":field.length,
+        "length_from":field.length_from,
+        "length_adjust":field.length_adjust,
+        "repeat":field.repeat,
+        "repeat_from":field.repeat_from,
+        "terminator":field.terminator.as_ref().map(|bytes|crate::value::bytes_to_hex(bytes)),
+        "when":field.when,
+        "bit_offset":field.bit_offset,
+        "bits":field.bits,
+        "format":field.format,
+        "enum":field.enum_values.iter().map(|(key,value)|(key.clone(),value_json(value))).collect::<Map<_,_>>(),
+        "fields":field.fields.iter().map(header_field_json).collect::<Vec<_>>(),
+        "switch_on":field.switch_on,
+        "cases":field.cases.iter().map(|(key,fields)|(key.clone(),serde_json::Value::Array(fields.iter().map(header_field_json).collect()))).collect::<Map<_,_>>(),
+        "transform":field.transform,
+        "key_from":field.key_from,
+        "nonce_from":field.nonce_from,
+        "checksum":field.checksum,
+        "checksum_range":field.checksum_range,
+    })
 }
 
 fn value_map_json(
