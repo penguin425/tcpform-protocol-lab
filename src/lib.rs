@@ -58,6 +58,7 @@ pub mod packet;
 pub mod packetdrill;
 pub mod parser;
 pub mod pcap_import;
+pub mod performance;
 pub mod platform;
 pub mod plugin;
 pub mod primitives;
