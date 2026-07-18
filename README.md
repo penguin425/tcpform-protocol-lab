@@ -343,6 +343,32 @@ $ tcpform run examples/tcp_handshake.tcpf tcp_handshake
 result: ok (6 events)
 ```
 
+### Specification requirements and coverage
+
+Import RFC 2119-style normative statements from a local specification into a
+reviewable requirement catalog and starter DSL:
+
+```sh
+tcpform spec import specification.txt \
+  --protocol example \
+  --output example.tcpf \
+  --requirements requirements.json \
+  --source https://example.test/spec
+```
+
+Extraction is heuristic. Generated steps are disabled proposals (`when = false`)
+and include their source category and confidence; review them and replace them
+with executable send/receive/assert steps before using the result for
+conformance claims. Associate any DSL step with one or more catalog entries via
+`requirements = ["REQ-0001"]`. The IDs are retained in JSON execution traces.
+
+Generate a covered/failed/untested report from a normal JSON trace:
+
+```sh
+tcpform run --json-file trace.json example.tcpf example
+tcpform spec coverage requirements.json trace.json --output coverage.json
+```
+
 ## The DSL
 
 A `.tcpf` file contains `protocol` blocks; each contains `step` blocks.

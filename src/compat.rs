@@ -111,6 +111,7 @@ pub fn dsl_json_schema() -> serde_json::Value {
                     "name":{"type":"string","minLength":1}, "role":{"type":"string","minLength":1},
                     "action":{"enum":["send","recv","send_raw","recv_raw","ack","nack","wait","open","close","reset","drop","duplicate","corrupt","assert","set","log","plugin"]},
                     "depends_on":{"type":"array","items":{"type":"string"}},
+                    "requirements":{"type":"array","items":{"type":"string"}},
                     "retry":{"type":"integer","minimum":0}, "loop":{"type":"integer","minimum":0}
                 }, "additionalProperties": true
             },

@@ -13,6 +13,69 @@ fn load_protocol(src: &str, name: &str) -> Protocol {
 }
 
 #[test]
+fn spec_import_generates_reviewable_dsl_and_requirement_coverage() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!("tcpform-spec-{unique}"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let spec = directory.join("spec.txt");
+    let dsl = directory.join("generated.tcpf");
+    let catalog = directory.join("requirements.json");
+    let trace = directory.join("trace.json");
+    let report = directory.join("coverage.json");
+    std::fs::write(
+        &spec,
+        "1. Session Rules\nA peer MUST enter the ready state. Invalid frames MUST NOT be accepted.\n",
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_tcpform");
+    let imported = std::process::Command::new(binary)
+        .arg("spec")
+        .arg("import")
+        .arg(&spec)
+        .args(["--protocol", "imported", "--output"])
+        .arg(&dsl)
+        .arg("--requirements")
+        .arg(&catalog)
+        .args(["--source", "RFC-TEST"])
+        .output()
+        .unwrap();
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    let generated = std::fs::read_to_string(&dsl).unwrap();
+    assert!(generated.contains("requirements = [\"REQ-0001\"]"));
+    assert!(generated.contains("when = false"));
+    assert_eq!(load_protocol(&generated, "imported").steps.len(), 2);
+
+    assert!(std::process::Command::new(binary)
+        .args(["run", "--json-file"])
+        .arg(&trace)
+        .arg(&dsl)
+        .arg("imported")
+        .status()
+        .unwrap()
+        .success());
+    assert!(std::process::Command::new(binary)
+        .args(["spec", "coverage"])
+        .arg(&catalog)
+        .arg(&trace)
+        .args(["--output"])
+        .arg(&report)
+        .status()
+        .unwrap()
+        .success());
+    let coverage: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
+    assert_eq!(coverage["summary"]["untested"], 2);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn doctor_json_and_shell_completion_cli_are_available() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

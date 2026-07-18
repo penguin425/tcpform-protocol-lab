@@ -44,6 +44,7 @@ fn main() {
         "ci-report" => cmd_ci_report(&args[2..]),
         "doctor" => cmd_doctor(&args[2..]),
         "completion" => cmd_completion(&args[2..]),
+        "spec" => cmd_spec(&args[2..]),
         "import-pcap" => cmd_import_pcap(&args[2..]),
         "import-kaitai" => cmd_import_kaitai(&args[2..]),
         "packetdrill" => cmd_packetdrill(&args[2..]),
@@ -100,6 +101,8 @@ fn usage() {
          tcpform ci-report <baseline.json> <current.json> [--markdown <file>] [--json <file>] [--fail-on-regression]\n  \
          tcpform doctor [--json] [project-directory]\n  \
          tcpform completion <bash|zsh>\n  \
+         tcpform spec import <spec.txt> --protocol <name> --output <file.tcpf> --requirements <requirements.json> [--source <reference>]\n  \
+         tcpform spec coverage <requirements.json> <trace.json> [--output <coverage.json>]\n  \
          tcpform import-pcap <capture.pcap|capture.pcapng> --protocol <name> --output <file> [--analysis <report.json>]\n  \
          tcpform import-kaitai <schema.ksy> --output <file> [--protocol <name>]\n  \
          tcpform packetdrill export <source> <protocol> --local-role <role> --output <file.pkt>\n  \
@@ -127,6 +130,77 @@ fn usage() {
          tcpform run --raw --interface <name> --role <role> [--snaplen <bytes>] [--promiscuous] [--receive-outgoing] [--allow-host-tcp] [--drop-uid <id> --drop-gid <id>] <file> <protocol>\n  \
          tcpform test [--json] [--junit <file>] [--jobs <n>] [--case <regex>] [--tag <tag>] [--shard <i/n>] <file> [protocol]"
     );
+}
+
+fn cmd_spec(args: &[String]) -> Result<(), String> {
+    let subcommand = args
+        .first()
+        .map(String::as_str)
+        .ok_or("spec requires `import` or `coverage`")?;
+    match subcommand {
+        "import" => {
+            let input = args.get(1).filter(|arg| !arg.starts_with('-')).ok_or(
+                "usage: tcpform spec import <spec.txt> --protocol <name> --output <file.tcpf> --requirements <requirements.json> [--source <reference>]",
+            )?;
+            let option = |name: &str| -> Result<Option<&str>, String> {
+                match args.iter().position(|arg| arg == name) {
+                    Some(index) => Ok(Some(
+                        args.get(index + 1)
+                            .ok_or_else(|| format!("{name} requires a value"))?,
+                    )),
+                    None => Ok(None),
+                }
+                .map(|value| value.map(String::as_str))
+            };
+            let protocol = option("--protocol")?.ok_or("spec import requires --protocol <name>")?;
+            let output = option("--output")?.ok_or("spec import requires --output <file.tcpf>")?;
+            let requirements = option("--requirements")?
+                .ok_or("spec import requires --requirements <requirements.json>")?;
+            let source = option("--source")?.unwrap_or(input);
+            let text = fs::read_to_string(input).map_err(|error| error.to_string())?;
+            let catalog = tcpform::spec_traceability::import_spec(&text, source)?;
+            let dsl = tcpform::spec_traceability::starter_dsl(&catalog, protocol);
+            fs::write(output, dsl).map_err(|error| error.to_string())?;
+            fs::write(
+                requirements,
+                format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&catalog).map_err(|error| error.to_string())?
+                ),
+            )
+            .map_err(|error| error.to_string())?;
+            println!(
+                "imported {} review-required requirements into {output}",
+                catalog.requirements.len()
+            );
+            Ok(())
+        }
+        "coverage" => {
+            let catalog_path = args.get(1).ok_or("usage: tcpform spec coverage <requirements.json> <trace.json> [--output <coverage.json>]")?;
+            let trace_path = args.get(2).ok_or("usage: tcpform spec coverage <requirements.json> <trace.json> [--output <coverage.json>]")?;
+            let catalog: tcpform::spec_traceability::RequirementCatalog = serde_json::from_str(
+                &fs::read_to_string(catalog_path).map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| format!("invalid requirement catalog: {error}"))?;
+            let trace: serde_json::Value = serde_json::from_str(
+                &fs::read_to_string(trace_path).map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| format!("invalid trace JSON: {error}"))?;
+            let report = tcpform::spec_traceability::coverage(&catalog, &trace)?;
+            let rendered = format!(
+                "{}\n",
+                serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+            );
+            if let Some(index) = args.iter().position(|arg| arg == "--output") {
+                let path = args.get(index + 1).ok_or("--output requires a file")?;
+                fs::write(path, rendered).map_err(|error| error.to_string())?;
+            } else {
+                print!("{rendered}");
+            }
+            Ok(())
+        }
+        other => Err(format!("unknown spec subcommand `{other}`")),
+    }
 }
 
 fn cmd_platform(args: &[String]) -> Result<(), String> {

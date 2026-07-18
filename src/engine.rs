@@ -35,6 +35,8 @@ pub struct TraceEvent {
     pub seq: u64,
     pub role: String,
     pub step: String,
+    /// Specification requirements associated with the executed DSL step.
+    pub requirements: Vec<String>,
     pub action: Action,
     pub ok: bool,
     pub detail: String,
@@ -755,6 +757,12 @@ impl Engine {
             network,
             observer,
             allow_plugins: self.allow_plugins,
+            step_requirements: self
+                .protocol
+                .steps
+                .iter()
+                .map(|step| (step.name.clone(), step.requirements.clone()))
+                .collect(),
         });
 
         // Per-role ordered step lists (plan order restricted to the role ==
@@ -2853,6 +2861,7 @@ struct Sim {
     network: NetworkProtocol,
     observer: Option<TraceObserver>,
     allow_plugins: bool,
+    step_requirements: HashMap<String, Vec<String>>,
 }
 
 type SimFailure = (String, FailureKind, String, Vec<AssertionFailure>);
@@ -2921,10 +2930,16 @@ impl Sim {
             self.started.elapsed().as_nanos()
         };
         let timestamp_us = (timestamp_ns / 1000).min(u128::from(u64::MAX)) as u64;
+        let requirements = self
+            .step_requirements
+            .get(&ev.step)
+            .cloned()
+            .unwrap_or_default();
         let event = TraceEvent {
             seq,
             role: ev.role,
             step: ev.step,
+            requirements,
             action: ev.action,
             ok: ev.ok,
             detail: ev.detail,
