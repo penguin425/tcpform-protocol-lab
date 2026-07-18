@@ -1,0 +1,21 @@
+tcpform { dsl_version = 2 }
+
+protocol "dynamic_message" {
+  description = "Length-prefixed, tagged, repeated and checksummed message"
+
+  header_schema "message" {
+    endian = "big"
+    fields = {
+      kind = { order=1 length=1 format="uint" enum={ "1"="request" "2"="response" } }
+      payload_length = { order=2 length=2 format="uint" }
+      payload = { order=3 length_from="payload_length" format="bytes" }
+      crc = { order=4 length=4 format="uint" checksum="crc32" checksum_range="all_before" }
+    }
+  }
+
+  step "document_schema" {
+    role = "author"
+    action = "log"
+    message = "dynamic message schema is ready"
+  }
+}

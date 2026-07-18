@@ -3005,6 +3005,63 @@ fn custom_header_schema_is_validated_and_emitted_in_manifest() {
 }
 
 #[test]
+fn dynamic_schema_cli_decodes_and_encodes_length_prefixed_messages() {
+    let source = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/examples/dynamic_message_schema.tcpf"
+    );
+    let binary = env!("CARGO_BIN_EXE_tcpform");
+    let crc = {
+        let output = std::process::Command::new(binary)
+            .args([
+                "schema",
+                "encode",
+                source,
+                "dynamic_message",
+                "message",
+                "--values",
+            ])
+            .arg({
+                let path = std::env::temp_dir()
+                    .join(format!("tcpform-schema-values-{}.json", std::process::id()));
+                std::fs::write(&path, r#"{"kind":1,"payload_length":3,"payload":"616263"}"#)
+                    .unwrap();
+                path
+            })
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    };
+    assert!(crc.starts_with("010003616263"));
+    let output = std::process::Command::new(binary)
+        .args([
+            "schema",
+            "decode",
+            source,
+            "dynamic_message",
+            "message",
+            "--hex",
+            &crc,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let decoded: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(decoded["fields"]["payload_length"].as_f64(), Some(3.0));
+    assert_eq!(decoded["checksum_valid"]["crc"], true);
+    assert_eq!(decoded["unknown_hex"], "");
+}
+
+#[test]
 fn schema_source_import_alias_and_selection_are_enforced() {
     let unknown =
         parse_file(r#"protocol "p" { step "s" { role="a" action="send" typo=true } }"#).unwrap();

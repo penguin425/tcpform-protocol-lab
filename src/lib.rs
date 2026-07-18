@@ -42,6 +42,7 @@ pub mod compat;
 pub mod completion;
 pub mod conformance;
 pub mod doctor;
+pub mod dynamic_schema;
 pub mod engine;
 pub mod fuzz_export;
 pub mod graph;
@@ -68,6 +69,9 @@ pub mod transport;
 pub mod value;
 
 pub use ast::Block;
+pub use dynamic_schema::{
+    decode_schema, decode_schema_with_context, encode_schema, DecodedSchema, SchemaError,
+};
 pub use engine::{AssertionFailure, CaseResult, Engine, EngineError, FailureKind, TraceEvent};
 pub use loader::{load_blocks, load_blocks_from_sources};
 pub use model::{

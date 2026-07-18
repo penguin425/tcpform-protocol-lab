@@ -18,7 +18,9 @@ name = "tcpform"
 path = "src/main.rs"
 
 [dependencies]
+aes-gcm = "0.10"
 ed25519-dalek = "3.0.0"
+flate2 = "1"
 regex-lite = "0.1.9"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
