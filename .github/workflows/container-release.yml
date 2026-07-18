@@ -79,7 +79,7 @@ jobs:
         linux/arm64=ubuntu-24.04-arm
       output: image
       push: true
-      context: https://github.com/${{ github.repository }}.git#${{ needs.prepare.outputs.tag }}
+      context: .
       target: runtime
       platforms: linux/amd64,linux/arm64
       cache: true
@@ -121,7 +121,7 @@ jobs:
         linux/arm64=ubuntu-24.04-arm
       output: image
       push: true
-      context: https://github.com/${{ github.repository }}.git#${{ needs.prepare.outputs.tag }}
+      context: .
       target: dashboard
       platforms: linux/amd64,linux/arm64
       cache: true
