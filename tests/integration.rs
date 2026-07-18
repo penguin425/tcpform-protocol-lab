@@ -118,6 +118,47 @@ fn doctor_json_and_shell_completion_cli_are_available() {
 }
 
 #[test]
+fn orchestrate_dry_run_plans_multi_node_role_topology() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let scenario = std::env::temp_dir().join(format!("tcpform-topology-{unique}.json"));
+    std::fs::write(
+        &scenario,
+        r#"{
+          "nodes":[{"name":"remote","executor":"ssh","host":"node.example"}],
+          "links":[{"from":"local","to":"remote","latency_ms":10}],
+          "processes":[
+            {"name":"server","node":"remote","roles":["server"],"command":["tcpform","run","server.tcpf"]},
+            {"name":"client","roles":["client"],"start_after":["server"],"command":["tcpform","run","client.tcpf"]}
+          ]
+        }"#,
+    )
+    .unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tcpform"))
+        .arg("orchestrate")
+        .arg(&scenario)
+        .arg("--dry-run")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let plan: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        plan["startup_order"],
+        serde_json::json!(["server", "client"])
+    );
+    assert_eq!(plan["processes"][0]["command"][0], "ssh");
+    assert_eq!(plan["processes"][1]["roles"][0], "client");
+    assert_eq!(plan["links"][0]["latency_ms"], 10);
+    std::fs::remove_file(scenario).unwrap();
+}
+
+#[test]
 fn import_pcap_cli_generates_valid_dsl_and_smoke_case() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

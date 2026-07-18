@@ -1036,8 +1036,37 @@ and preserve assertion expected/actual values plus the failure trace.
   re-encryption, optional upstream mTLS, ALPN, and application-byte JSONL
   capture. It never generates or installs trust certificates implicitly.
 - `orchestrate` starts declared external processes, optionally under Linux
-  network namespaces, manages timeout/cleanup, and owns tcpdump capture from
-  start through shutdown.
+  network namespaces or on declared SSH nodes, manages dependency-ordered
+  startup, timeout/cleanup, and tcpdump capture from start through shutdown.
+  A scenario can assign protocol roles to nodes and declare directional link
+  characteristics:
+
+```json
+{
+  "nodes": [
+    {"name":"edge", "executor":"ssh", "host":"edge.example", "user":"runner"}
+  ],
+  "links": [
+    {"from":"local", "to":"edge", "latency_ms":25, "loss_rate":0.01,
+     "bandwidth_bps":1000000}
+  ],
+  "processes": [
+    {"name":"server", "node":"edge", "roles":["server"],
+     "command":["tcpform","run","server.tcpf","demo"],
+     "startup_delay_ms":500},
+    {"name":"client", "node":"local", "roles":["client"],
+     "start_after":["server"],
+     "command":["tcpform","run","client.tcpf","demo"]}
+  ]
+}
+```
+
+Use `--dry-run` to inspect the validated startup order and exact local/SSH
+commands without starting anything. Each child receives `TCPFORM_NODE`,
+`TCPFORM_ROLES`, and `TCPFORM_TOPOLOGY_LINKS`; the final report aggregates
+node, role, exit status, and duration for every process. Link declarations are
+metadata for topology-aware children and do not mutate host routing or traffic
+control implicitly.
 
 ### `set { ... }` and `assert { ... }`
 
