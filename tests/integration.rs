@@ -3115,6 +3115,7 @@ fn docker_raw_lab_scenario_runs_and_container_policy_is_hardened() {
     for required in [
         "target: runtime",
         "target: dashboard",
+        "context: .",
         "platforms: linux/amd64,linux/arm64",
         "docker/github-builder/.github/workflows/build.yml@v1",
         "linux/arm64=ubuntu-24.04-arm",
