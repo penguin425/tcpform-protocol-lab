@@ -131,6 +131,8 @@ tcpform lsp                           # Language Server Protocol over stdio
 tcpform generate-faults --output faults <file>
 tcpform fuzz-export boofuzz protocol.tcpf demo --role client --output fuzz.py --port 9000
 tcpform fuzz-export aflnet protocol.tcpf demo --role client --output aflnet-seeds
+tcpform fuzz protocol.tcpf demo --role client --connect 127.0.0.1:9000 \
+  --iterations 1000 --seed 42 --output fuzz-results
 tcpform explore <file> <protocol>     # loss/delay/seed matrix + minimal failure
 tcpform bundle --output repro.tcpfbundle <file> <protocol>
 tcpform replay-bundle repro.tcpfbundle
@@ -226,6 +228,21 @@ requires an explicit or generated host and port and does not run automatically.
 `manifest.json`, and an AFL dictionary. Interpolated payloads are rejected
 instead of being exported with unresolved variables. Run fuzzers only against
 systems you own or are explicitly authorized to test.
+
+`tcpform fuzz` runs a deterministic state-aware robustness campaign itself.
+It mutates both message bytes and message sequences, retains inputs that add
+response/state or optional target-supplied code coverage, classifies timeouts
+and abnormal disconnects, deduplicates findings, and shrinks a representative
+failure input. `report.json`, coverage-increasing corpus entries, finding
+metadata, and minimized raw inputs are written below `--output`.
+
+Safety limits are enforced before execution: iteration and input sizes are
+bounded, `--connect` must be a literal address, and only loopback targets are
+allowed by default. `--allow-owned-target` must be supplied for a non-loopback
+system and is intended only for systems the operator owns or is explicitly
+authorized to test. CI exercises the feature exclusively through a bounded
+loopback fixture. A line-oriented or JSON string-array `--coverage-file` can
+be used by an instrumented local target to publish covered identifiers.
 
 External templates use `.tcpform/template-registry.json` as an explicit trust
 policy. Each entry names a trusted owner, semantic version, full 40-character
