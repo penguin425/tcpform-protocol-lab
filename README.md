@@ -144,6 +144,9 @@ tcpform observe trace.json --ebpf kernel.jsonl --start-unix-ns 17000000000000000
 tcpform standards ttcn3-export protocol.tcpf demo --output demo.ttcn3
 tcpform standards ttcn3-import demo.ttcn3 --protocol demo --output demo.tcpf
 tcpform standards asn1-import messages.asn1 --type Message --protocol demo --output demo.tcpf
+tcpform perf protocol.tcpf demo --iterations 100 --warmup 10 --jobs 4 \
+  --deadline-us 5000 --max-deadline-misses 0 --max-p95-us 4000 \
+  --max-jitter-us 1000 --min-throughput 500 --output performance.json
 tcpform proxy --listen 127.0.0.1:8443 --upstream service:443 \
   --tls-cert proxy.pem --tls-key proxy-key.pem --tls-upstream \
   --ca upstream-ca.pem --server-name service
@@ -189,6 +192,28 @@ Optional/default fields, UTF-8 character counts, unconstrained integers and
 variable sizes fail with a field-specific diagnostic. The result is explicitly
 labeled a fixed-width projection—not BER, DER, CER, or PER—so it cannot be
 mistaken for an ASN.1 encoding-rule implementation.
+
+### Performance and real-time gates
+
+`perf` switches the selected protocol to the real clock, performs excluded
+warmup runs, then executes a bounded number of measured iterations across a
+bounded worker count. Its versioned JSON report includes success rate and
+failures, throughput, run-latency min/mean/p50/p95/p99/max, p99–p50 jitter,
+scheduler overhead, deadline misses, and per-step/per-role timeline intervals.
+
+All requested gates are evaluated after the report is written, so failed CI
+runs retain evidence. A prior report can be compared for both p95 latency and
+throughput regression:
+
+```sh
+tcpform perf protocol.tcpf demo --iterations 100 --output current.json \
+  --baseline baseline.json --max-regression-percent 10
+```
+
+Wall-clock benchmarks are sensitive to host load. Use dedicated runners,
+enough warmups and iterations, and realistic tolerances for release gates;
+functional correctness remains covered independently by `test`, snapshots,
+and model checking.
 
 `tcpform interop` drives two or more named TCP implementations with the same
 DSL role, records failures without stopping the remaining runs, and compares

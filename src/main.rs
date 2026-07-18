@@ -59,6 +59,7 @@ fn main() {
         "model-check" => cmd_model_check(&args[2..]),
         "observe" => cmd_observe(&args[2..]),
         "standards" => cmd_standards(&args[2..]),
+        "perf" => cmd_performance(&args[2..]),
         "generate-faults" => cmd_generate_faults(&args[2..]),
         "fuzz" => cmd_native_fuzz(&args[2..]),
         "fuzz-export" => cmd_fuzz_export(&args[2..]),
@@ -121,6 +122,7 @@ fn usage() {
          tcpform model-check <source> <protocol> [--max-states <n>] [--output <report.json>] [--fail-on-violation]\n  \
          tcpform observe <trace.json> --output <otlp.json> --start-unix-ns <n> [--ebpf <events.jsonl>] [--service-name <name>] [--correlation-window-ns <n>]\n  \
          tcpform standards <ttcn3-export|ttcn3-import|asn1-import> ...\n  \
+         tcpform perf <source> <protocol> --output <report.json> [--iterations <n>] [--warmup <n>] [--jobs <n>] [performance gates]\n  \
          tcpform generate-faults --output <directory> <source>\n  \
          tcpform fuzz <source> <protocol> --role <role> --connect <address> --output <directory> [--iterations <n>] [--seed <n>] [--framing <kind>] [--coverage-file <path>] [--max-input-bytes <n>] [--stop-on-crash]\n  \
          tcpform fuzz-export <boofuzz|aflnet> <source> <protocol> --role <role> --output <path> [--host <host> --port <port>]\n  \
@@ -3723,6 +3725,141 @@ fn cmd_standards(args: &[String]) -> Result<(), String> {
         }
         other => Err(format!("unknown standards subcommand `{other}`")),
     }
+}
+
+fn cmd_performance(args: &[String]) -> Result<(), String> {
+    let mut positional = Vec::new();
+    let mut values = HashMap::new();
+    let flags = [
+        "--output",
+        "--iterations",
+        "--warmup",
+        "--jobs",
+        "--deadline-us",
+        "--baseline",
+        "--min-success-rate",
+        "--min-throughput",
+        "--max-p95-us",
+        "--max-jitter-us",
+        "--max-deadline-misses",
+        "--max-regression-percent",
+    ];
+    let mut index = 0;
+    while index < args.len() {
+        let argument = args[index].as_str();
+        if flags.contains(&argument) {
+            index += 1;
+            values.insert(
+                argument,
+                args.get(index)
+                    .ok_or_else(|| format!("{argument} requires a value"))?
+                    .as_str(),
+            );
+        } else if argument.starts_with('-') {
+            return Err(format!("unknown perf option `{argument}`"));
+        } else {
+            positional.push(argument);
+        }
+        index += 1;
+    }
+    if positional.len() != 2 {
+        return Err(
+            "usage: tcpform perf <source> <protocol> --output <report.json> [options]".into(),
+        );
+    }
+    let parse_usize = |flag: &str, default: usize| -> Result<usize, String> {
+        values
+            .get(flag)
+            .map(|value| {
+                value
+                    .parse()
+                    .map_err(|_| format!("{flag} must be a non-negative integer"))
+            })
+            .transpose()
+            .map(|value| value.unwrap_or(default))
+    };
+    let parse_u64 = |flag: &str| -> Result<Option<u64>, String> {
+        values
+            .get(flag)
+            .map(|value| {
+                value
+                    .parse()
+                    .map_err(|_| format!("{flag} must be an unsigned integer"))
+            })
+            .transpose()
+    };
+    let parse_f64 = |flag: &str| -> Result<Option<f64>, String> {
+        values
+            .get(flag)
+            .map(|value| {
+                value
+                    .parse::<f64>()
+                    .map_err(|_| format!("{flag} must be a number"))
+            })
+            .transpose()
+    };
+    let output = values
+        .get("--output")
+        .ok_or("perf requires --output <report.json>")?;
+    let protocols = load(positional[0])?;
+    let config = tcpform::performance::PerformanceConfig {
+        iterations: parse_usize("--iterations", 20)?,
+        warmup: parse_usize("--warmup", 3)?,
+        jobs: parse_usize("--jobs", 1)?,
+        deadline_us: parse_u64("--deadline-us")?,
+    };
+    let mut report = tcpform::performance::benchmark(find(&protocols, positional[1])?, &config)?;
+    if let Some(path) = values.get("--baseline") {
+        let baseline: tcpform::performance::PerformanceReport =
+            serde_json::from_str(&fs::read_to_string(path).map_err(|error| error.to_string())?)
+                .map_err(|error| format!("invalid performance baseline: {error}"))?;
+        if baseline.schema_version != report.schema_version {
+            return Err(format!(
+                "performance baseline schema version `{}` does not match `{}`",
+                baseline.schema_version, report.schema_version
+            ));
+        }
+        if baseline.protocol != report.protocol {
+            return Err(format!(
+                "performance baseline protocol `{}` does not match `{}`",
+                baseline.protocol, report.protocol
+            ));
+        }
+        tcpform::performance::compare_baseline(&mut report, &baseline);
+    }
+    if values.contains_key("--max-regression-percent") && !values.contains_key("--baseline") {
+        return Err("--max-regression-percent requires --baseline".into());
+    }
+    let success_rate = parse_f64("--min-success-rate")?.unwrap_or(1.0);
+    if !(0.0..=1.0).contains(&success_rate) {
+        return Err("--min-success-rate must be 0.0–1.0".into());
+    }
+    let min_throughput = parse_f64("--min-throughput")?;
+    let max_regression = parse_f64("--max-regression-percent")?;
+    if min_throughput.is_some_and(|value| !value.is_finite() || value < 0.0) {
+        return Err("--min-throughput must be finite and non-negative".into());
+    }
+    if max_regression.is_some_and(|value| !value.is_finite() || value < 0.0) {
+        return Err("--max-regression-percent must be finite and non-negative".into());
+    }
+    let gate = tcpform::performance::gate(
+        &report,
+        success_rate,
+        min_throughput,
+        parse_u64("--max-p95-us")?,
+        parse_u64("--max-jitter-us")?,
+        parse_usize("--max-deadline-misses", 0)?,
+        max_regression,
+    );
+    fs::write(
+        output,
+        format!(
+            "{}\n",
+            serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+        ),
+    )
+    .map_err(|error| error.to_string())?;
+    gate.map_err(|failures| format!("performance gate failed:\n- {}", failures.join("\n- ")))
 }
 
 fn cmd_generate_faults(args: &[String]) -> Result<(), String> {

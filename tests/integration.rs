@@ -267,6 +267,81 @@ fn standards_cli_round_trips_ttcn3_and_imports_fixed_asn1() {
 }
 
 #[test]
+fn performance_cli_reports_metrics_baselines_and_ci_gates() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!("tcpform-perf-{unique}"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let baseline = directory.join("baseline.json");
+    let current = directory.join("current.json");
+    let failed = directory.join("failed.json");
+    let binary = env!("CARGO_BIN_EXE_tcpform");
+    let example =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/stop_and_wait.tcpf");
+    let run = |output: &std::path::Path, extra: &[&str]| {
+        let mut command = std::process::Command::new(binary);
+        command
+            .args(["perf"])
+            .arg(&example)
+            .args(["stop_and_wait", "--output"])
+            .arg(output)
+            .args([
+                "--iterations",
+                "4",
+                "--warmup",
+                "1",
+                "--jobs",
+                "2",
+                "--deadline-us",
+                "1000000",
+            ])
+            .args(extra)
+            .output()
+            .unwrap()
+    };
+    let first = run(&baseline, &[]);
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let second = run(
+        &current,
+        &[
+            "--baseline",
+            baseline.to_str().unwrap(),
+            "--max-regression-percent",
+            "100000",
+        ],
+    );
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&current).unwrap()).unwrap();
+    assert_eq!(report["metrics"]["latency_us"]["samples"], 4);
+    assert!(
+        report["metrics"]["throughput_runs_per_second"]
+            .as_f64()
+            .unwrap()
+            > 0.0
+    );
+    assert!(report["step_intervals"]
+        .as_object()
+        .unwrap()
+        .contains_key("f0"));
+    assert!(report["baseline"]["p95_change_percent"].is_number());
+    let rejected = run(&failed, &["--min-throughput", "1e100"]);
+    assert!(!rejected.status.success());
+    assert!(failed.exists(), "gate failures must retain the report");
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn import_pcap_cli_generates_valid_dsl_and_smoke_case() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
