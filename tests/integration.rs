@@ -208,6 +208,65 @@ fn observe_cli_correlates_ebpf_jsonl_into_otlp_json() {
 }
 
 #[test]
+fn standards_cli_round_trips_ttcn3_and_imports_fixed_asn1() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!("tcpform-standards-{unique}"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let ttcn = directory.join("handshake.ttcn3");
+    let roundtrip = directory.join("roundtrip.tcpf");
+    let asn = directory.join("message.asn1");
+    let asn_dsl = directory.join("asn1.tcpf");
+    let binary = env!("CARGO_BIN_EXE_tcpform");
+    let example =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/tcp_handshake.tcpf");
+    assert!(std::process::Command::new(binary)
+        .args(["standards", "ttcn3-export"])
+        .arg(&example)
+        .args(["tcp_handshake", "--output"])
+        .arg(&ttcn)
+        .status()
+        .unwrap()
+        .success());
+    assert!(std::fs::read_to_string(&ttcn)
+        .unwrap()
+        .contains("tcpform-step:"));
+    assert!(std::process::Command::new(binary)
+        .args(["standards", "ttcn3-import"])
+        .arg(&ttcn)
+        .args(["--protocol", "roundtrip", "--output"])
+        .arg(&roundtrip)
+        .status()
+        .unwrap()
+        .success());
+    assert!(std::process::Command::new(binary)
+        .arg("validate")
+        .arg(&roundtrip)
+        .status()
+        .unwrap()
+        .success());
+
+    std::fs::write(&asn, "Demo DEFINITIONS ::= BEGIN\nMessage ::= SEQUENCE { id INTEGER (0..65535), active BOOLEAN, body OCTET STRING (SIZE(4)) }\nEND\n").unwrap();
+    assert!(std::process::Command::new(binary)
+        .args(["standards", "asn1-import"])
+        .arg(&asn)
+        .args(["--type", "Message", "--protocol", "asn_demo", "--output"])
+        .arg(&asn_dsl)
+        .status()
+        .unwrap()
+        .success());
+    assert!(std::process::Command::new(binary)
+        .arg("validate")
+        .arg(&asn_dsl)
+        .status()
+        .unwrap()
+        .success());
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn import_pcap_cli_generates_valid_dsl_and_smoke_case() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
