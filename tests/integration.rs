@@ -3652,6 +3652,56 @@ fn explicit_protocol_states_are_enforced_and_exposed() {
 }
 
 #[test]
+fn model_check_cli_reports_counterexamples_and_can_gate_ci() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!("tcpform-model-check-{unique}"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let source = directory.join("protocol.tcpf");
+    let report = directory.join("report.json");
+    std::fs::write(
+        &source,
+        r#"tcpform { dsl_version = 2 }
+protocol "unsafe" {
+  invariant "no_error" { kind="never_state" role="client" state="error" }
+  invariant "ready" { kind="eventually_state" role="client" state="ready" }
+  step "fail" { role="client" action="log" from_state="initial" to_state="error" }
+  step "blocked" { role="client" action="log" from_state="ready" }
+}
+"#,
+    )
+    .unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tcpform"))
+        .args(["model-check"])
+        .arg(&source)
+        .args(["unsafe", "--output"])
+        .arg(&report)
+        .arg("--fail-on-violation")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let document: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
+    assert_eq!(document["complete"], true);
+    assert_eq!(document["unreachable_steps"][0], "blocked");
+    assert!(document["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|violation| {
+            violation["invariant"] == "no_error" && violation["counterexample"][0] == "fail"
+        }));
+    assert!(document["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|violation| violation["kind"] == "deadlock"));
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn deterministic_disconnect_and_delay_spike_faults_work() {
     let disconnected = load_protocol(
         r#"

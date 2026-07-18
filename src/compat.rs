@@ -117,8 +117,13 @@ pub fn dsl_json_schema() -> serde_json::Value {
             },
             "protocol": {
                 "type":"object", "required":["name","steps"],
-                "properties":{"name":{"type":"string","minLength":1},"description":{"type":["string","null"]},"steps":{"type":"array","items":{"$ref":"#/$defs/step"}}},
+                "properties":{"name":{"type":"string","minLength":1},"description":{"type":["string","null"]},"steps":{"type":"array","items":{"$ref":"#/$defs/step"}},"invariants":{"type":"array","items":{"$ref":"#/$defs/invariant"}}},
                 "additionalProperties": true
+            },
+            "invariant": {
+                "type":"object", "required":["name","kind","role","state"],
+                "properties":{"name":{"type":"string","minLength":1},"kind":{"enum":["never_state","eventually_state","state_implies"]},"role":{"type":"string"},"state":{"type":"string"},"implies_role":{"type":"string"},"implies_state":{"type":"string"}},
+                "additionalProperties": false
             },
             "cases": {
                 "type":"object", "required":["protocol","cases"],
