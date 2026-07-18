@@ -3116,16 +3116,24 @@ fn docker_raw_lab_scenario_runs_and_container_policy_is_hardened() {
         "target: runtime",
         "target: dashboard",
         "platforms: linux/amd64,linux/arm64",
+        "docker/github-builder/.github/workflows/build.yml@v1",
+        "linux/arm64=ubuntu-24.04-arm",
+        "cache: true",
+        "cache-mode: max",
         "sbom: true",
-        "provenance: mode=max",
+        "sign: true",
         "cosign sign --yes",
-        "DOCKERHUB_ENABLED",
+        "skopeo copy --all --preserve-digests",
     ] {
         assert!(
             container_release.contains(required),
             "missing container release policy: {required}"
         );
     }
+    assert!(
+        !container_release.contains("setup-qemu-action"),
+        "container releases must use native runners instead of QEMU"
+    );
 
     let dockerfile = std::fs::read_to_string("Dockerfile").unwrap();
     assert!(dockerfile.contains("--uid 10001"));

@@ -6,6 +6,12 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Distribute container releases across native AMD64 and ARM64 runners, reuse
+  architecture-scoped BuildKit caches, and mirror completed manifests to
+  Docker Hub without rebuilding them under QEMU.
+
 ## [0.7.0] - 2026-07-19
 
 ### Added

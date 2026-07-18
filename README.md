@@ -786,9 +786,12 @@ docker compose -f compose.published.yml --profile visual up
 
 Maintainers publish `linux/amd64` and `linux/arm64` images to GHCR from signed
 release tags. The images include SBOM and provenance attestations and are
-signed with Sigstore keyless signing. If the `DOCKERHUB_USERNAME` and
-`DOCKERHUB_TOKEN` repository secrets are configured, the workflow mirrors the
-same tags to the `tcpform` and `tcpform-dashboard` Docker Hub repositories.
+signed with Sigstore keyless signing. AMD64 and ARM64 builds run concurrently
+on native GitHub-hosted runners and use architecture-scoped BuildKit caches;
+the release path does not emulate ARM with QEMU. If the `DOCKERHUB_USERNAME`
+and `DOCKERHUB_TOKEN` repository secrets are configured, the workflow copies
+the completed multi-platform manifests and attestations to the `tcpform` and
+`tcpform-dashboard` Docker Hub repositories without compiling them again.
 
 ### Visual Docker communication monitor
 
