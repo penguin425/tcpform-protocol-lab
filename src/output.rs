@@ -150,6 +150,12 @@ pub fn visualization_manifest_with_case_traces(
         "cases":cases,
         "trace_files":trace_files,
         "transport":protocol.transport.as_ref().map(|t|json!({"loss_rate":t.loss_rate,"delay_ms":t.delay_ms,"reorder":t.reorder,"seed":t.seed,"disconnect_nth":t.disconnect_nth,"delay_spike_nth":t.delay_spike_nth,"delay_spike_ms":t.delay_spike_ms,"mtu":t.mtu,"mtu_blackhole":t.mtu_blackhole,"port_capacity":t.port_capacity,"nat_source_ip":t.nat_source_ip,"nat_source_port":t.nat_source_port})),
+        "invariants":protocol.invariants.iter().map(|invariant| json!({
+            "name":invariant.name,
+            "kind":match invariant.kind { crate::InvariantKind::NeverState => "never_state", crate::InvariantKind::EventuallyState => "eventually_state", crate::InvariantKind::StateImplies => "state_implies" },
+            "role":invariant.role,"state":invariant.state,
+            "implies_role":invariant.implies_role,"implies_state":invariant.implies_state,
+        })).collect::<Vec<_>>(),
         "header_schemas":protocol.header_schemas.iter().map(|schema| json!({
             "name":schema.name,"offset":schema.offset,"endian":schema.endian,
             "fields":schema.fields.iter().map(header_field_json).collect::<Vec<_>>()

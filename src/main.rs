@@ -56,6 +56,7 @@ fn main() {
         "orchestrate" => cmd_orchestrate(&args[2..]),
         "proxy" => cmd_proxy(&args[2..]),
         "explore" => cmd_explore(&args[2..]),
+        "model-check" => cmd_model_check(&args[2..]),
         "generate-faults" => cmd_generate_faults(&args[2..]),
         "fuzz" => cmd_native_fuzz(&args[2..]),
         "fuzz-export" => cmd_fuzz_export(&args[2..]),
@@ -115,6 +116,7 @@ fn usage() {
          tcpform orchestrate <scenario.json> [--dry-run]\n  \
          tcpform proxy --listen <address> --upstream <address> [TLS options]\n  \
          tcpform explore <source> <protocol>\n  \
+         tcpform model-check <source> <protocol> [--max-states <n>] [--output <report.json>] [--fail-on-violation]\n  \
          tcpform generate-faults --output <directory> <source>\n  \
          tcpform fuzz <source> <protocol> --role <role> --connect <address> --output <directory> [--iterations <n>] [--seed <n>] [--framing <kind>] [--coverage-file <path>] [--max-input-bytes <n>] [--stop-on-crash]\n  \
          tcpform fuzz-export <boofuzz|aflnet> <source> <protocol> --role <role> --output <path> [--host <host> --port <port>]\n  \
@@ -3547,6 +3549,58 @@ fn cmd_explore(args: &[String]) -> Result<(), String> {
         .unwrap()
     );
     Ok(())
+}
+
+fn cmd_model_check(args: &[String]) -> Result<(), String> {
+    let mut positional = Vec::new();
+    let mut max_states = 10_000usize;
+    let mut output = None;
+    let mut fail_on_violation = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--max-states" => {
+                index += 1;
+                max_states = args
+                    .get(index)
+                    .ok_or("--max-states requires a value")?
+                    .parse()
+                    .map_err(|_| "--max-states must be a positive integer")?;
+            }
+            "--output" => {
+                index += 1;
+                output = Some(args.get(index).ok_or("--output requires a file")?.as_str());
+            }
+            "--fail-on-violation" => fail_on_violation = true,
+            flag if flag.starts_with('-') => {
+                return Err(format!("unknown model-check option `{flag}`"))
+            }
+            value => positional.push(value),
+        }
+        index += 1;
+    }
+    let path = positional.first().ok_or("usage: tcpform model-check <source> <protocol> [--max-states <n>] [--output <report.json>] [--fail-on-violation]")?;
+    let name = positional.get(1).ok_or("usage: tcpform model-check <source> <protocol> [--max-states <n>] [--output <report.json>] [--fail-on-violation]")?;
+    if positional.len() != 2 {
+        return Err("model-check requires exactly one source and protocol".to_string());
+    }
+    let protocols = load(path)?;
+    let report = tcpform::model_check::check(find(&protocols, name)?, max_states)?;
+    let has_violations = !report.violations.is_empty() || !report.complete;
+    let rendered = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+    );
+    if let Some(output) = output {
+        fs::write(output, rendered).map_err(|error| error.to_string())?;
+    } else {
+        print!("{rendered}");
+    }
+    if fail_on_violation && has_violations {
+        Err("model check found violations or exhausted its state bound".to_string())
+    } else {
+        Ok(())
+    }
 }
 
 fn cmd_generate_faults(args: &[String]) -> Result<(), String> {

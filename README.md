@@ -373,6 +373,46 @@ tcpform spec coverage requirements.json trace.json --output coverage.json
 
 A `.tcpf` file contains `protocol` blocks; each contains `step` blocks.
 
+### Finite-state model checking
+
+Declare safety, liveness, and cross-role state invariants inside a protocol:
+
+```text
+protocol "session" {
+  invariant "no_error" {
+    kind = "never_state"
+    role = "client"
+    state = "error"
+  }
+  invariant "eventually_ready" {
+    kind = "eventually_state"
+    role = "client"
+    state = "ready"
+  }
+  invariant "client_ready_requires_server" {
+    kind = "state_implies"
+    role = "client"
+    state = "ready"
+    implies_role = "server"
+    implies_state = "ready"
+  }
+
+  # steps with from_state / to_state follow...
+}
+```
+
+`model-check` exhaustively explores valid interleavings up to a configurable
+bound. It reports invariant violations, liveness failures, deadlocks,
+unreachable steps, and a reproducible step-name counterexample for each
+violation. CI can fail on either a violation or an exhausted state bound:
+
+```sh
+tcpform model-check protocol.tcpf session \
+  --max-states 10000 \
+  --output model-check.json \
+  --fail-on-violation
+```
+
 ```text
 protocol "tcp_handshake" {
   description = "TCP three-way handshake"

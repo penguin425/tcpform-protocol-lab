@@ -58,6 +58,25 @@ pub struct Protocol {
     pub raw_tcp_stateful: bool,
     /// Declarative byte/bit layouts used by the visualizer for proprietary headers.
     pub header_schemas: Vec<HeaderSchema>,
+    /// Safety and liveness properties evaluated by the finite-state model checker.
+    pub invariants: Vec<Invariant>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Invariant {
+    pub name: String,
+    pub kind: InvariantKind,
+    pub role: String,
+    pub state: String,
+    pub implies_role: Option<String>,
+    pub implies_state: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvariantKind {
+    NeverState,
+    EventuallyState,
+    StateImplies,
 }
 
 #[derive(Debug, Clone)]
@@ -835,7 +854,12 @@ fn interpret_protocol(b: &Block) -> Result<Protocol, ModelError> {
     validate_attributes(b, &["description", "clock", "raw_tcp_stateful"])?;
     validate_children(
         b,
-        |child| matches!(child, "step" | "transport" | "limits" | "header_schema"),
+        |child| {
+            matches!(
+                child,
+                "step" | "transport" | "limits" | "header_schema" | "invariant"
+            )
+        },
         &format!("protocol `{name}`"),
     )?;
     ensure_single_child(b, "transport", &format!("protocol `{name}`"))?;
@@ -900,6 +924,26 @@ fn interpret_protocol(b: &Block) -> Result<Protocol, ModelError> {
         }
         header_schemas.push(parsed);
     }
+    let mut invariants = Vec::new();
+    let mut invariant_names = HashSet::new();
+    for block in b.children("invariant") {
+        let invariant = interpret_invariant(block).map_err(|error| at_block(error, block))?;
+        if !invariant_names.insert(invariant.name.clone()) {
+            return Err(err(format!("duplicate invariant `{}`", invariant.name)));
+        }
+        invariants.push(invariant);
+    }
+    let roles: HashSet<_> = steps.iter().map(|step| step.role.as_str()).collect();
+    for invariant in &invariants {
+        for role in std::iter::once(&invariant.role).chain(invariant.implies_role.iter()) {
+            if !roles.contains(role.as_str()) {
+                return Err(err(format!(
+                    "invariant `{}` references unknown role `{role}`",
+                    invariant.name
+                )));
+            }
+        }
+    }
     Ok(Protocol {
         name,
         description,
@@ -909,6 +953,56 @@ fn interpret_protocol(b: &Block) -> Result<Protocol, ModelError> {
         clock,
         raw_tcp_stateful,
         header_schemas,
+        invariants,
+    })
+}
+
+fn interpret_invariant(b: &Block) -> Result<Invariant, ModelError> {
+    let name = b
+        .labels
+        .first()
+        .cloned()
+        .ok_or_else(|| err("invariant block needs a name label"))?;
+    if b.labels.len() != 1 {
+        return Err(err("invariant block requires exactly one name label"));
+    }
+    validate_attributes(
+        b,
+        &["kind", "role", "state", "implies_role", "implies_state"],
+    )?;
+    validate_children(b, |_| false, &format!("invariant `{name}`"))?;
+    let context = format!("invariant `{name}`");
+    let required = |key: &str| {
+        optional_string(&b.attributes, &context, key)?
+            .ok_or_else(|| err(format!("{context} requires `{key}`")))
+    };
+    let kind = match required("kind")?.as_str() {
+        "never_state" => InvariantKind::NeverState,
+        "eventually_state" => InvariantKind::EventuallyState,
+        "state_implies" => InvariantKind::StateImplies,
+        value => return Err(err(format!("{context} has unknown kind `{value}`"))),
+    };
+    let role = required("role")?;
+    let state = required("state")?;
+    let implies_role = optional_string(&b.attributes, &context, "implies_role")?;
+    let implies_state = optional_string(&b.attributes, &context, "implies_state")?;
+    if kind == InvariantKind::StateImplies && (implies_role.is_none() || implies_state.is_none()) {
+        return Err(err(format!(
+            "{context} state_implies requires implies_role and implies_state"
+        )));
+    }
+    if kind != InvariantKind::StateImplies && (implies_role.is_some() || implies_state.is_some()) {
+        return Err(err(format!(
+            "{context} only permits implies_* with state_implies"
+        )));
+    }
+    Ok(Invariant {
+        name,
+        kind,
+        role,
+        state,
+        implies_role,
+        implies_state,
     })
 }
 

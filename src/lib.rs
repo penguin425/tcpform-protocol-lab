@@ -50,6 +50,7 @@ pub mod interoperability;
 pub mod kaitai;
 pub mod loader;
 pub mod model;
+pub mod model_check;
 pub mod native_fuzz;
 pub mod output;
 pub mod packet;
@@ -77,9 +78,9 @@ pub use dynamic_schema::{
 pub use engine::{AssertionFailure, CaseResult, Engine, EngineError, FailureKind, TraceEvent};
 pub use loader::{load_blocks, load_blocks_from_sources};
 pub use model::{
-    Action, Assert, Case, CaseExpect, CaseOutcome, Cases, ClockMode, Expect, FieldMatch,
-    PluginSpec, Protocol, RawPacketSpec, ResourceLimits, RetryPolicy, Segment, Set, Step, Timer,
-    TransportConfig,
+    Action, Assert, Case, CaseExpect, CaseOutcome, Cases, ClockMode, Expect, FieldMatch, Invariant,
+    InvariantKind, PluginSpec, Protocol, RawPacketSpec, ResourceLimits, RetryPolicy, Segment, Set,
+    Step, Timer, TransportConfig,
 };
 pub use parser::{parse_file, parse_file_named};
 pub use plugin::{invoke_plugin, PluginCapabilities, PluginManifest, PLUGIN_PROTOCOL_VERSION};
