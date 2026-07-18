@@ -6,6 +6,28 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-19
+
+### Added
+
+- Define bidirectional dynamic message schemas with length, repetition,
+  conditions, enums, bit fields, nested regions, checksums, compression, and
+  authenticated encryption.
+- Run bounded, state-aware robustness campaigns with deterministic mutation,
+  novelty retention, crash artifacts, and delta-debugged reproducers.
+- Import normative specification requirements and trace them to protocol tests
+  and conformance results.
+- Explore finite protocol state spaces, check invariants, and report deadlocks
+  with counterexample traces.
+- Plan multi-node, multi-role topologies with remote placement, links,
+  dependencies, namespaces, and capture points.
+- Correlate eBPF network events with protocol traces and export OpenTelemetry
+  spans in OTLP JSON form.
+- Exchange annotated TTCN-3 protocol flows and import fixed-layout ASN.1
+  definitions with explicit encoding limitations.
+- Benchmark protocols using bounded real-clock workers, latency percentiles,
+  throughput, jitter, deadlines, JSON baselines, and CI regression gates.
+
 ## [0.6.0] - 2026-07-17
 
 ### Added
@@ -129,7 +151,8 @@ All notable changes to tcpform are documented here. The format follows
   live transports, raw packet workflows, browser visualizer, test cases, fault
   injection, PCAP output, LSP, formatter, bundles, plugins, and CI tooling.
 
-[Unreleased]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.0...v0.5.1
