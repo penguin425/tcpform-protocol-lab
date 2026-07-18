@@ -57,6 +57,7 @@ fn main() {
         "proxy" => cmd_proxy(&args[2..]),
         "explore" => cmd_explore(&args[2..]),
         "model-check" => cmd_model_check(&args[2..]),
+        "observe" => cmd_observe(&args[2..]),
         "generate-faults" => cmd_generate_faults(&args[2..]),
         "fuzz" => cmd_native_fuzz(&args[2..]),
         "fuzz-export" => cmd_fuzz_export(&args[2..]),
@@ -117,6 +118,7 @@ fn usage() {
          tcpform proxy --listen <address> --upstream <address> [TLS options]\n  \
          tcpform explore <source> <protocol>\n  \
          tcpform model-check <source> <protocol> [--max-states <n>] [--output <report.json>] [--fail-on-violation]\n  \
+         tcpform observe <trace.json> --output <otlp.json> --start-unix-ns <n> [--ebpf <events.jsonl>] [--service-name <name>] [--correlation-window-ns <n>]\n  \
          tcpform generate-faults --output <directory> <source>\n  \
          tcpform fuzz <source> <protocol> --role <role> --connect <address> --output <directory> [--iterations <n>] [--seed <n>] [--framing <kind>] [--coverage-file <path>] [--max-input-bytes <n>] [--stop-on-crash]\n  \
          tcpform fuzz-export <boofuzz|aflnet> <source> <protocol> --role <role> --output <path> [--host <host> --port <port>]\n  \
@@ -3601,6 +3603,67 @@ fn cmd_model_check(args: &[String]) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+fn cmd_observe(args: &[String]) -> Result<(), String> {
+    let input = args.first().filter(|value| !value.starts_with('-')).ok_or("usage: tcpform observe <trace.json> --output <otlp.json> --start-unix-ns <n> [--ebpf <events.jsonl>] [--service-name <name>] [--correlation-window-ns <n>]")?;
+    let value_after = |flag: &str| -> Result<Option<&str>, String> {
+        args.iter()
+            .position(|value| value == flag)
+            .map(|index| {
+                args.get(index + 1)
+                    .map(String::as_str)
+                    .ok_or_else(|| format!("{flag} requires a value"))
+            })
+            .transpose()
+    };
+    let output = value_after("--output")?.ok_or("observe requires --output <otlp.json>")?;
+    let start_unix_ns = value_after("--start-unix-ns")?
+        .ok_or("observe requires --start-unix-ns <n>")?
+        .parse::<u128>()
+        .map_err(|_| "--start-unix-ns must be an unsigned integer")?;
+    let service_name = value_after("--service-name")?.unwrap_or("tcpform");
+    let correlation_window_ns = value_after("--correlation-window-ns")?
+        .map(|value| {
+            value
+                .parse::<u128>()
+                .map_err(|_| "--correlation-window-ns must be an unsigned integer")
+        })
+        .transpose()?
+        .unwrap_or(1_000_000);
+    let known = [
+        "--output",
+        "--start-unix-ns",
+        "--ebpf",
+        "--service-name",
+        "--correlation-window-ns",
+    ];
+    let mut index = 1;
+    while index < args.len() {
+        if !known.contains(&args[index].as_str()) {
+            return Err(format!("unknown observe option `{}`", args[index]));
+        }
+        index += 2;
+    }
+    let trace = fs::read_to_string(input).map_err(|error| error.to_string())?;
+    let ebpf = value_after("--ebpf")?
+        .map(|path| fs::read_to_string(path).map_err(|error| error.to_string()))
+        .transpose()?;
+    let document = tcpform::observability::to_otlp_json(
+        &trace,
+        ebpf.as_deref(),
+        service_name,
+        start_unix_ns,
+        correlation_window_ns,
+    )?;
+    fs::write(
+        output,
+        format!(
+            "{}\n",
+            serde_json::to_string_pretty(&document).map_err(|error| error.to_string())?
+        ),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn cmd_generate_faults(args: &[String]) -> Result<(), String> {

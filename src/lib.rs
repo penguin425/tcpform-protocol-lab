@@ -52,6 +52,7 @@ pub mod loader;
 pub mod model;
 pub mod model_check;
 pub mod native_fuzz;
+pub mod observability;
 pub mod output;
 pub mod packet;
 pub mod packetdrill;

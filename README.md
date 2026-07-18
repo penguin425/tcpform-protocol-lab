@@ -139,10 +139,36 @@ tcpform replay-bundle repro.tcpfbundle
 tcpform anonymize input.json shared.json
 tcpform gate metrics.json --min-success-rate 1 --max-p95-us 50000
 tcpform orchestrate scenario.json [--dry-run]
+tcpform observe trace.json --ebpf kernel.jsonl --start-unix-ns 1700000000000000000 \
+  --service-name demo --output otlp.json
 tcpform proxy --listen 127.0.0.1:8443 --upstream service:443 \
   --tls-cert proxy.pem --tls-key proxy-key.pem --tls-upstream \
   --ca upstream-ca.pem --server-name service
 ```
+
+### OpenTelemetry and eBPF correlation
+
+`observe` converts the stable JSON produced by `run --json-file` into the
+OTLP/HTTP JSON trace shape. One span is emitted per tcpform step, including
+role, action, network, wire-byte count, requirement IDs, and success status.
+Optional eBPF collector events in JSONL are attached to the nearest step as
+OpenTelemetry span events:
+
+```json
+{"timestamp_ns":1050,"event":"tcp_sendmsg","pid":42,"tid":42,
+ "socket_cookie":123,"bytes":64,"duration_ns":3000,
+ "attributes":{"comm":"demo"}}
+```
+
+The collector timestamp and tcpform `timestamp_ns` must use the same monotonic
+origin. `--correlation-window-ns` bounds nearest-event matching, while
+unmatched kernel events remain in a `tcpform.ebpf.unmatched` span instead of
+being discarded. Count summaries are OTLP resource attributes.
+`--start-unix-ns` anchors monotonic timestamps to
+Unix time explicitly, making exports deterministic and suitable for an OTLP
+collector, Jaeger, Tempo, or another OpenTelemetry backend. tcpform consumes
+collector output but does not load privileged eBPF programs or change kernel
+settings itself.
 
 `tcpform interop` drives two or more named TCP implementations with the same
 DSL role, records failures without stopping the remaining runs, and compares
