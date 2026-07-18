@@ -3124,6 +3124,7 @@ fn docker_raw_lab_scenario_runs_and_container_policy_is_hardened() {
         "sbom: true",
         "sign: true",
         "cosign sign --yes",
+        "docker/login-action@v4",
         "skopeo copy --all --preserve-digests",
     ] {
         assert!(
