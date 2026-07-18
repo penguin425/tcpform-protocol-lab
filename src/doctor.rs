@@ -371,14 +371,21 @@ fn github_actions_check(root: &Path) -> DoctorCheck {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     fn temporary_project() -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("tcpform-doctor-{unique}"));
+        let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "tcpform-doctor-{}-{unique}-{sequence}",
+            std::process::id()
+        ));
         fs::create_dir_all(&path).unwrap();
         path
     }
