@@ -56,6 +56,7 @@ fn main() {
         "proxy" => cmd_proxy(&args[2..]),
         "explore" => cmd_explore(&args[2..]),
         "generate-faults" => cmd_generate_faults(&args[2..]),
+        "fuzz" => cmd_native_fuzz(&args[2..]),
         "fuzz-export" => cmd_fuzz_export(&args[2..]),
         "plugin" => cmd_plugin(&args[2..]),
         "tls-audit" => cmd_tls_audit(&args[2..]),
@@ -112,6 +113,7 @@ fn usage() {
          tcpform proxy --listen <address> --upstream <address> [TLS options]\n  \
          tcpform explore <source> <protocol>\n  \
          tcpform generate-faults --output <directory> <source>\n  \
+         tcpform fuzz <source> <protocol> --role <role> --connect <address> --output <directory> [--iterations <n>] [--seed <n>] [--framing <kind>] [--coverage-file <path>] [--max-input-bytes <n>] [--stop-on-crash]\n  \
          tcpform fuzz-export <boofuzz|aflnet> <source> <protocol> --role <role> --output <path> [--host <host> --port <port>]\n  \
          tcpform plugin <manifest.json> <action|matcher|decoder|report> <name> <input.json>\n  \
          tcpform tls-audit (--cert <file> | --connect <address> --server-name <name>) [--ca <file>] [--alpn <protocol>] [--warn-days <days>]\n  \
@@ -304,6 +306,178 @@ fn cmd_fuzz_export(args: &[String]) -> Result<(), String> {
         _ => unreachable!(),
     }
     println!("generated {output}");
+    Ok(())
+}
+
+fn cmd_native_fuzz(args: &[String]) -> Result<(), String> {
+    let source = args.first().ok_or("fuzz requires a DSL source")?;
+    let name = args.get(1).ok_or("fuzz requires a protocol name")?;
+    let mut role = None;
+    let mut address = None;
+    let mut output = None;
+    let mut coverage_file = None;
+    let mut iterations = 1_000usize;
+    let mut seed = 1u64;
+    let mut max_input_bytes = 1usize << 20;
+    let mut framing = tcpform::Framing::Raw;
+    let mut stop_on_crash = false;
+    let mut allow_owned_target = false;
+    let mut index = 2;
+    while index < args.len() {
+        let option = args[index].as_str();
+        if matches!(option, "--stop-on-crash" | "--allow-owned-target") {
+            stop_on_crash |= option == "--stop-on-crash";
+            allow_owned_target |= option == "--allow-owned-target";
+            index += 1;
+            continue;
+        }
+        let value = args
+            .get(index + 1)
+            .ok_or_else(|| format!("{option} requires a value"))?;
+        match option {
+            "--role" => role = Some(value.clone()),
+            "--connect" => address = Some(value.clone()),
+            "--output" => output = Some(value.clone()),
+            "--coverage-file" => coverage_file = Some(value.clone()),
+            "--iterations" => iterations = value.parse().map_err(|_| "invalid --iterations")?,
+            "--seed" => seed = value.parse().map_err(|_| "invalid --seed")?,
+            "--max-input-bytes" => {
+                max_input_bytes = value.parse().map_err(|_| "invalid --max-input-bytes")?
+            }
+            "--framing" => framing = parse_framing(value)?,
+            _ => return Err(format!("unknown fuzz option `{option}`")),
+        }
+        index += 2;
+    }
+    if iterations == 0 || iterations > 1_000_000 {
+        return Err("--iterations must be between 1 and 1000000".into());
+    }
+    if max_input_bytes == 0 || max_input_bytes > 16 * 1024 * 1024 {
+        return Err("--max-input-bytes must be between 1 and 16777216".into());
+    }
+    let role = role.ok_or("fuzz requires --role <role>")?;
+    let address = address.ok_or("fuzz requires --connect <address>")?;
+    let output = output.ok_or("fuzz requires --output <directory>")?;
+    let socket: std::net::SocketAddr = address
+        .parse()
+        .map_err(|_| "--connect must be a literal IP address and port")?;
+    if !socket.ip().is_loopback() && !allow_owned_target {
+        return Err("non-loopback targets are disabled by default; use --allow-owned-target only for a system you own or are explicitly authorized to test".into());
+    }
+    let protocols = interpret(&load_blocks(source)?).map_err(|error| error.to_string())?;
+    let protocol = find(&protocols, name)?;
+    let config = tcpform::native_fuzz::FuzzConfig {
+        iterations,
+        seed,
+        max_input_bytes,
+        stop_on_crash,
+    };
+    let report = tcpform::native_fuzz::run_campaign(protocol, &role, &config, |candidate| {
+        let result = Engine::new(candidate.clone()).and_then(|engine| {
+            engine.run_external_tcp_framed(&role, &address, false, framing.clone())
+        });
+        let code_coverage = coverage_file
+            .as_deref()
+            .map(read_coverage_ids)
+            .unwrap_or_default();
+        match result {
+            Ok(trace) => tcpform::native_fuzz::FuzzObservation {
+                outcome: tcpform::native_fuzz::FuzzOutcome::Ok,
+                trace,
+                detail: None,
+                code_coverage,
+            },
+            Err(EngineError::Plan(message)) => tcpform::native_fuzz::FuzzObservation {
+                outcome: tcpform::native_fuzz::FuzzOutcome::Rejected,
+                trace: Vec::new(),
+                detail: Some(message),
+                code_coverage,
+            },
+            Err(EngineError::Runtime {
+                kind,
+                message,
+                trace,
+                ..
+            }) => {
+                let outcome = match kind {
+                    tcpform::FailureKind::Timeout => tcpform::native_fuzz::FuzzOutcome::Hang,
+                    tcpform::FailureKind::Panic => tcpform::native_fuzz::FuzzOutcome::Crash,
+                    tcpform::FailureKind::Transport if !trace.is_empty() => {
+                        tcpform::native_fuzz::FuzzOutcome::Crash
+                    }
+                    _ => tcpform::native_fuzz::FuzzOutcome::Rejected,
+                };
+                tcpform::native_fuzz::FuzzObservation {
+                    outcome,
+                    trace,
+                    detail: Some(message),
+                    code_coverage,
+                }
+            }
+        }
+    })?;
+    write_fuzz_results(std::path::Path::new(&output), &report)?;
+    println!(
+        "completed {} executions; state coverage {}, code coverage {}, findings {}",
+        report.executions,
+        report.state_coverage,
+        report.code_coverage,
+        report.findings.len()
+    );
+    Ok(())
+}
+
+fn read_coverage_ids(path: &str) -> std::collections::BTreeSet<String> {
+    let Ok(content) = fs::read_to_string(path) else {
+        return Default::default();
+    };
+    serde_json::from_str::<Vec<String>>(&content)
+        .map(|values| values.into_iter().collect())
+        .unwrap_or_else(|_| {
+            content
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+}
+
+fn write_fuzz_results(
+    directory: &std::path::Path,
+    report: &tcpform::native_fuzz::FuzzReport,
+) -> Result<(), String> {
+    fs::create_dir_all(directory.join("corpus")).map_err(|error| error.to_string())?;
+    fs::create_dir_all(directory.join("findings")).map_err(|error| error.to_string())?;
+    fs::write(
+        directory.join("report.json"),
+        format!("{}\n", serde_json::to_string_pretty(report).unwrap()),
+    )
+    .map_err(|error| error.to_string())?;
+    for entry in &report.corpus {
+        fs::write(
+            directory
+                .join("corpus")
+                .join(format!("case_{:06}.json", entry.iteration)),
+            format!("{}\n", serde_json::to_string_pretty(entry).unwrap()),
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    for finding in &report.findings {
+        let base = format!("finding_{:06}", finding.iteration);
+        fs::write(
+            directory.join("findings").join(format!("{base}.json")),
+            format!("{}\n", serde_json::to_string_pretty(finding).unwrap()),
+        )
+        .map_err(|error| error.to_string())?;
+        if let Some(hex) = &finding.minimized_hex {
+            fs::write(
+                directory.join("findings").join(format!("{base}.raw")),
+                tcpform::parse_hex(hex)?,
+            )
+            .map_err(|error| error.to_string())?;
+        }
+    }
     Ok(())
 }
 

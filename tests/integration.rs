@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::time::{Duration, Instant};
 use tcpform::model::{interpret, parse_duration_ms};
 use tcpform::{bytes_to_hex, parse_file, parse_hex, Engine, Protocol, Value};
@@ -220,6 +221,86 @@ fn fuzz_export_cli_writes_boofuzz_harness_and_aflnet_corpus() {
             .unwrap();
     assert_eq!(manifest["messages"][1]["offset"], 5);
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn native_campaign_cli_is_bounded_to_loopback_and_writes_reproducible_results() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        for _ in 0..8 {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.write_all(b"PONG").unwrap();
+        }
+    });
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("tcpform-native-campaign-{unique}"));
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("protocol.tcpf");
+    std::fs::write(&source, r#"tcpform { dsl_version=2 }
+      protocol "service" {
+        limits { connect_timeout="1s" max_runtime="2s" }
+        step "request" { role="client" action="send" segment { payload="PING" } }
+        step "response" { role="client" action="recv" depends_on=["request"] expect { payload="PONG" } timer { timeout="1s" } }
+        step "peer" { role="server" action="log" }
+      }"#).unwrap();
+    let output = root.join("results");
+    let result = std::process::Command::new(env!("CARGO_BIN_EXE_tcpform"))
+        .arg("fuzz")
+        .arg(&source)
+        .arg("service")
+        .args([
+            "--role",
+            "client",
+            "--connect",
+            &address.to_string(),
+            "--iterations",
+            "8",
+            "--seed",
+            "7",
+            "--max-input-bytes",
+            "64",
+            "--output",
+        ])
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    server.join().unwrap();
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(output.join("report.json")).unwrap())
+            .unwrap();
+    assert_eq!(report["iterations"], 8);
+    assert_eq!(report["seed"], 7);
+    assert!(report["state_coverage"].as_u64().unwrap() > 0);
+    assert!(output.join("corpus").is_dir());
+
+    let rejected = std::process::Command::new(env!("CARGO_BIN_EXE_tcpform"))
+        .arg("fuzz")
+        .arg(&source)
+        .arg("service")
+        .args([
+            "--role",
+            "client",
+            "--connect",
+            "192.0.2.1:9",
+            "--iterations",
+            "1",
+            "--output",
+        ])
+        .arg(root.join("rejected"))
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("disabled by default"));
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

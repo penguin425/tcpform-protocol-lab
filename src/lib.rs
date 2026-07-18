@@ -50,6 +50,7 @@ pub mod interoperability;
 pub mod kaitai;
 pub mod loader;
 pub mod model;
+pub mod native_fuzz;
 pub mod output;
 pub mod packet;
 pub mod packetdrill;
