@@ -159,6 +159,55 @@ fn orchestrate_dry_run_plans_multi_node_role_topology() {
 }
 
 #[test]
+fn observe_cli_correlates_ebpf_jsonl_into_otlp_json() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!("tcpform-observe-{unique}"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let trace = directory.join("trace.json");
+    let ebpf = directory.join("ebpf.jsonl");
+    let output = directory.join("otlp.json");
+    std::fs::write(&trace, r#"{"events":[{"index":0,"timestamp_ns":"1000","role":"client","step":"request","action":"send","ok":true,"detail":"sent","network":"tcp","wire_hex":"abcd","requirements":["REQ-0001"]}]}"#).unwrap();
+    std::fs::write(
+        &ebpf,
+        "{\"timestamp_ns\":1050,\"event\":\"tcp_sendmsg\",\"pid\":42,\"bytes\":2}\n",
+    )
+    .unwrap();
+    let result = std::process::Command::new(env!("CARGO_BIN_EXE_tcpform"))
+        .arg("observe")
+        .arg(&trace)
+        .args(["--output"])
+        .arg(&output)
+        .args(["--start-unix-ns", "1000000000", "--ebpf"])
+        .arg(&ebpf)
+        .args(["--service-name", "demo", "--correlation-window-ns", "100"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let document: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&output).unwrap()).unwrap();
+    let span = &document["resourceSpans"][0]["scopeSpans"][0]["spans"][0];
+    assert_eq!(span["name"], "tcpform.client.request");
+    assert_eq!(span["events"][0]["name"], "ebpf.tcp_sendmsg");
+    assert_eq!(document.as_object().unwrap().len(), 1);
+    assert!(document["resourceSpans"][0]["resource"]["attributes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(
+            |attribute| attribute["key"] == "tcpform.correlated_ebpf_event_count"
+                && attribute["value"]["intValue"] == "1"
+        ));
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn import_pcap_cli_generates_valid_dsl_and_smoke_case() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

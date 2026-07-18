@@ -11,14 +11,14 @@ pub fn generate(shell: &str) -> Result<&'static str, String> {
 }
 
 #[cfg(test)]
-const COMMANDS: &str = "validate list plan visualize serve fmt migrate init template schema spec snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore model-check generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor completion import-pcap import-kaitai packetdrill help";
+const COMMANDS: &str = "validate list plan visualize serve fmt migrate init template schema spec snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore model-check observe generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor completion import-pcap import-kaitai packetdrill help";
 
 const BASH: &str = r#"_tcpform() {
   local cur prev commands
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
-  commands="validate list plan visualize serve fmt migrate init template schema spec snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore model-check generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor completion import-pcap import-kaitai packetdrill help"
+  commands="validate list plan visualize serve fmt migrate init template schema spec snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore model-check observe generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor completion import-pcap import-kaitai packetdrill help"
   case "$prev" in
     completion) COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") ); return ;;
     template) COMPREPLY=( $(compgen -W "list show search add" -- "$cur") ); return ;;
@@ -49,6 +49,7 @@ _tcpform() {
     'replay-bundle:replay a bundle' 'anonymize:anonymize a report' 'orchestrate:run a scenario'
     'proxy:start protocol proxy' 'explore:explore fault matrix' 'generate-faults:generate fault cases'
     'model-check:exhaustively check state invariants'
+    'observe:correlate eBPF events and export OpenTelemetry'
     'fuzz:run a bounded state-aware robustness campaign'
     'fuzz-export:generate boofuzz harnesses or AFLNet seeds'
     'plugin:invoke a plugin' 'tls-audit:audit TLS' 'differential:compare implementations'
