@@ -115,6 +115,8 @@ pub struct Step {
     pub role: String,
     pub action: Action,
     pub depends_on: Vec<String>,
+    /// Normative specification requirement IDs exercised by this step.
+    pub requirements: Vec<String>,
     /// Optional explicit per-role state required before this step executes.
     pub from_state: Option<String>,
     /// Optional explicit per-role state entered after this step succeeds.
@@ -1352,6 +1354,7 @@ fn interpret_step(b: &Block) -> Result<Step, ModelError> {
             "role",
             "action",
             "depends_on",
+            "requirements",
             "from_state",
             "to_state",
             "description",
@@ -1442,6 +1445,22 @@ fn interpret_step(b: &Block) -> Result<Step, ModelError> {
             )
         })?,
     };
+    let requirements = match b.attr("requirements") {
+        None => Vec::new(),
+        Some(value) => value.as_string_array().ok_or_else(|| {
+            type_error(
+                &format!("step `{name}`"),
+                "requirements",
+                "array of strings",
+                value,
+            )
+        })?,
+    };
+    if requirements.iter().any(|id| id.trim().is_empty()) {
+        return Err(err(format!(
+            "step `{name}` requirement IDs must not be empty"
+        )));
+    }
     let from_state = optional_string(&b.attributes, &context_for_step(&name), "from_state")?;
     let to_state = optional_string(&b.attributes, &context_for_step(&name), "to_state")?;
     for (key, value) in [("from_state", &from_state), ("to_state", &to_state)] {
@@ -1509,6 +1528,7 @@ fn interpret_step(b: &Block) -> Result<Step, ModelError> {
         role,
         action,
         depends_on,
+        requirements,
         from_state,
         to_state,
         description,

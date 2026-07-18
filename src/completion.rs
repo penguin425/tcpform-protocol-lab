@@ -11,14 +11,14 @@ pub fn generate(shell: &str) -> Result<&'static str, String> {
 }
 
 #[cfg(test)]
-const COMMANDS: &str = "validate list plan visualize serve fmt migrate init template schema snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor completion import-pcap import-kaitai packetdrill help";
+const COMMANDS: &str = "validate list plan visualize serve fmt migrate init template schema spec snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor completion import-pcap import-kaitai packetdrill help";
 
 const BASH: &str = r#"_tcpform() {
   local cur prev commands
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
-  commands="validate list plan visualize serve fmt migrate init template schema snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor completion import-pcap import-kaitai packetdrill help"
+  commands="validate list plan visualize serve fmt migrate init template schema spec snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor completion import-pcap import-kaitai packetdrill help"
   case "$prev" in
     completion) COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") ); return ;;
     template) COMPREPLY=( $(compgen -W "list show search add" -- "$cur") ); return ;;
@@ -44,7 +44,7 @@ _tcpform() {
     'validate:parse and validate protocols' 'list:list protocols' 'plan:show execution plan'
     'visualize:generate visualizer assets' 'serve:start visualizer server' 'fmt:format DSL files'
     'migrate:migrate DSL syntax' 'init:create a project' 'template:list or show templates'
-    'schema:print machine-readable schema' 'snapshot:create or check a local snapshot' 'ci-snapshot:create CI snapshot' 'ci-report:compare CI snapshots'
+    'schema:print machine-readable schema' 'spec:import and track specification requirements' 'snapshot:create or check a local snapshot' 'ci-snapshot:create CI snapshot' 'ci-report:compare CI snapshots'
     'lsp:start language server' 'gate:evaluate metrics' 'bundle:create reproduction bundle'
     'replay-bundle:replay a bundle' 'anonymize:anonymize a report' 'orchestrate:run a scenario'
     'proxy:start protocol proxy' 'explore:explore fault matrix' 'generate-faults:generate fault cases'
@@ -66,6 +66,7 @@ _tcpform() {
   fi
   case $words[2] in
     completion) _values 'shell' bash zsh ;;
+    spec) _values 'specification command' import coverage ;;
     template) _values 'template command' list show search add ;;
     fuzz-export) _values 'fuzzer' boofuzz aflnet ;;
     packetdrill) _values 'conversion direction' import export ;;
