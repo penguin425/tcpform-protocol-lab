@@ -6,6 +6,8 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-19
+
 ### Changed
 
 - Distribute container releases across native AMD64 and ARM64 runners, reuse
@@ -157,7 +159,8 @@ All notable changes to tcpform are documented here. The format follows
   live transports, raw packet workflows, browser visualizer, test cases, fault
   injection, PCAP output, LSP, formatter, bundles, plugins, and CI tooling.
 
-[Unreleased]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/penguin425/tcpform-protocol-lab/compare/v0.5.1...v0.5.2
