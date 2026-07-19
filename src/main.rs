@@ -75,6 +75,10 @@ fn main() {
             usage();
             Ok(())
         }
+        "version" | "-V" | "--version" => {
+            version();
+            Ok(())
+        }
         other => Err(format!("unknown command `{other}`")),
     };
     if let Err(e) = result {
@@ -138,6 +142,10 @@ fn usage() {
          tcpform run --raw --interface <name> --role <role> [--snaplen <bytes>] [--promiscuous] [--receive-outgoing] [--allow-host-tcp] [--drop-uid <id> --drop-gid <id>] <file> <protocol>\n  \
          tcpform test [--json] [--junit <file>] [--jobs <n>] [--case <regex>] [--tag <tag>] [--shard <i/n>] <file> [protocol]"
     );
+}
+
+fn version() {
+    println!("tcpform {}", env!("CARGO_PKG_VERSION"));
 }
 
 fn cmd_spec(args: &[String]) -> Result<(), String> {

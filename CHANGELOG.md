@@ -6,6 +6,10 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- version / -V / --version CLI flag, output, and integration test.
+
 ## [0.7.1] - 2026-07-19
 
 ### Changed
