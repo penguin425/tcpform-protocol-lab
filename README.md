@@ -150,6 +150,7 @@ tcpform perf protocol.tcpf demo --iterations 100 --warmup 10 --jobs 4 \
 tcpform proxy --listen 127.0.0.1:8443 --upstream service:443 \
   --tls-cert proxy.pem --tls-key proxy-key.pem --tls-upstream \
   --ca upstream-ca.pem --server-name service
+tcpform version                        # print the version number and exit
 ```
 
 ### OpenTelemetry and eBPF correlation

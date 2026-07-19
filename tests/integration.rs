@@ -4408,3 +4408,66 @@ fn interoperability_cli_builds_a_matrix_for_three_external_implementations() {
     }
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn prints_expected_output_and_exits_successfully() {
+    let output1 = std::process::Command::new(env!("CARGO_BIN_EXE_tcpform"))
+        .arg("version")
+        .output()
+        .unwrap();
+
+    assert!(
+        output1.status.success(),
+        "{}",
+        &String::from_utf8_lossy(&output1.stdout)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output1.stdout),
+        format!("tcpform {}\n", env!("CARGO_PKG_VERSION"))
+    );
+    assert!(
+        output1.stderr.is_empty(),
+        "{}",
+        &&String::from_utf8_lossy(&output1.stderr)
+    );
+
+    let output2 = std::process::Command::new(env!("CARGO_BIN_EXE_tcpform"))
+        .arg("--version")
+        .output()
+        .unwrap();
+
+    assert!(
+        output2.status.success(),
+        "{}",
+        &String::from_utf8_lossy(&output2.stdout)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output2.stdout),
+        format!("tcpform {}\n", env!("CARGO_PKG_VERSION"))
+    );
+    assert!(
+        output2.stderr.is_empty(),
+        "{}",
+        &&String::from_utf8_lossy(&output2.stderr)
+    );
+
+    let output3 = std::process::Command::new(env!("CARGO_BIN_EXE_tcpform"))
+        .arg("-V")
+        .output()
+        .unwrap();
+
+    assert!(
+        output3.status.success(),
+        "{}",
+        &String::from_utf8_lossy(&output3.stdout)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output3.stdout),
+        format!("tcpform {}\n", env!("CARGO_PKG_VERSION"))
+    );
+    assert!(
+        output3.stderr.is_empty(),
+        "{}",
+        &&String::from_utf8_lossy(&output3.stderr)
+    );
+}
