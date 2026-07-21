@@ -143,6 +143,16 @@ tcpform differential --left 127.0.0.1:8001 --right 127.0.0.1:8002 \
 - [x] Light theme and Japanese/English localization
 - [x] Accessibility labels/focus controls, mobile layout and crash recovery
 
+## Local productivity additions
+
+- [x] Scriptable/interactive trace debugger with breakpoints, watches and rewind
+- [x] Editable PCAP field boundaries with server-side DSL validation
+- [x] Runnable OpenAPI/Protobuf cases and deterministic CLI property generation
+- [x] DSL semantic compatibility report with CI exit status
+- [x] Raw performance samples and statistical latency significance gate
+- [x] Retention/capacity preview and explicitly confirmed pruning UI
+- [x] Reproducibly built browser WebAssembly simulator for the portable subset
+
 ## Live transports
 
 - [x] TCP/UDP/TLS/raw sockets and framing already available

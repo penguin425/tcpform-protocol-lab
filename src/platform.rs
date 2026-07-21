@@ -126,6 +126,14 @@ impl Debugger {
     pub fn cursor(&self) -> usize {
         self.cursor
     }
+    pub fn is_done(&self) -> bool {
+        self.cursor >= self.events.len()
+    }
+    pub fn inspect_current(&self) -> Option<Value> {
+        self.events
+            .get(self.cursor.saturating_sub(1))
+            .map(|event| self.inspect(event))
+    }
     fn inspect(&self, event: &crate::TraceEvent) -> Value {
         let full = json!({"index":event.seq,"timestamp_ns":event.timestamp_ns.to_string(),"role":event.role,"step":event.step,"action":event.action.as_str(),"ok":event.ok,"flags":event.flags,"seq":event.seq_num,"ack":event.ack_num,"peer":event.peer,"wire_hex":crate::bytes_to_hex(&event.wire_data)});
         let watched = self
@@ -150,7 +158,11 @@ pub fn openapi_to_tcpform(document: &Value) -> Result<String, String> {
         .get("paths")
         .and_then(Value::as_object)
         .ok_or("OpenAPI paths object is required")?;
-    let mut out = String::from("protocol \"openapi_generated\" {\n");
+    let mut out = String::from(
+        "tcpform { dsl_version = 2 }\n\nprotocol \"openapi_generated\" {\n  clock = \"virtual\"\n",
+    );
+    let mut cases = Vec::new();
+    let mut previous = None::<String>;
     for (path, methods) in paths {
         for (method, _) in methods
             .as_object()
@@ -165,8 +177,26 @@ pub fn openapi_to_tcpform(document: &Value) -> Result<String, String> {
                     .replace('/', "_")
                     .replace(['{', '}'], "")
             );
-            out.push_str(&format!("  step \"{name}\" {{ role = \"client\" action = \"send\" segment {{ fields = {{ method = \"{}\" path = \"{}\" }} }} }}\n",method.to_uppercase(),path));
+            let send = format!("{name}_request");
+            let receive = format!("{name}_receive");
+            let dependency = previous
+                .as_ref()
+                .map(|value| format!(" depends_on = [\"{value}\"]"))
+                .unwrap_or_default();
+            out.push_str(&format!("  step \"{send}\" {{ role = \"client\" action = \"send\"{dependency} segment {{ fields = {{ method = \"{}\" path = \"{}\" }} }} }}\n",method.to_uppercase(),path));
+            out.push_str(&format!("  step \"{receive}\" {{ role = \"server\" action = \"recv\" depends_on = [\"{send}\"] expect {{ fields = {{ method = \"{}\" path = \"{}\" }} }} }}\n",method.to_uppercase(),path));
+            previous = Some(receive);
+            cases.push(name);
         }
+    }
+    if cases.is_empty() {
+        return Err("OpenAPI document contains no supported operations".into());
+    }
+    out.push_str("}\n\ncases \"openapi_generated\" {\n");
+    for name in cases {
+        out.push_str(&format!(
+            "  case \"{name}\" {{ tags = [\"generated\", \"openapi\"] expect = \"pass\" }}\n"
+        ));
     }
     out.push_str("}\n");
     Ok(out)
@@ -179,7 +209,171 @@ pub fn protobuf_to_tcpform(source: &str) -> Result<String, String> {
         .and_then(|captures| captures.get(1))
         .map(|value| value.as_str())
         .ok_or("no protobuf message found")?;
-    Ok(format!("protocol \"{}\" {{\n  step \"send\" {{ role = \"client\" action = \"send\" segment {{ fields = {{ message_type = \"{}\" }} }} }}\n}}\n",message.to_ascii_lowercase(),message))
+    let protocol = message.to_ascii_lowercase();
+    Ok(format!("tcpform {{ dsl_version = 2 }}\n\nprotocol \"{protocol}\" {{\n  clock = \"virtual\"\n  step \"send\" {{ role = \"client\" action = \"send\" segment {{ fields = {{ message_type = \"{message}\" }} }} }}\n  step \"receive\" {{ role = \"server\" action = \"recv\" depends_on = [\"send\"] expect {{ fields = {{ message_type = \"{message}\" }} }} }}\n}}\n\ncases \"{protocol}\" {{\n  case \"{protocol}_round_trip\" {{ tags = [\"generated\", \"protobuf\"] expect = \"pass\" }}\n}}\n"))
+}
+
+pub fn protocol_compatibility(old: &crate::Protocol, new: &crate::Protocol) -> Value {
+    let old_steps = old
+        .steps
+        .iter()
+        .map(|step| (step.name.as_str(), step))
+        .collect::<HashMap<_, _>>();
+    let new_steps = new
+        .steps
+        .iter()
+        .map(|step| (step.name.as_str(), step))
+        .collect::<HashMap<_, _>>();
+    let mut breaking = Vec::new();
+    let mut warnings = Vec::new();
+    for (name, previous) in &old_steps {
+        let Some(current) = new_steps.get(name) else {
+            breaking.push(format!("removed step `{name}`"));
+            continue;
+        };
+        if previous.role != current.role {
+            breaking.push(format!(
+                "step `{name}` changed role from `{}` to `{}`",
+                previous.role, current.role
+            ));
+        }
+        if previous.action != current.action {
+            breaking.push(format!(
+                "step `{name}` changed action from `{}` to `{}`",
+                previous.action.as_str(),
+                current.action.as_str()
+            ));
+        }
+        for dependency in &previous.depends_on {
+            if !current.depends_on.contains(dependency) {
+                warnings.push(format!("step `{name}` removed dependency `{dependency}`"));
+            }
+        }
+        for dependency in &current.depends_on {
+            if !previous.depends_on.contains(dependency) {
+                breaking.push(format!(
+                    "step `{name}` added required dependency `{dependency}`"
+                ));
+            }
+        }
+    }
+    for name in new_steps
+        .keys()
+        .filter(|name| !old_steps.contains_key(**name))
+    {
+        warnings.push(format!("added step `{name}`"));
+    }
+    for schema in &old.header_schemas {
+        let Some(current) = new
+            .header_schemas
+            .iter()
+            .find(|candidate| candidate.name == schema.name)
+        else {
+            breaking.push(format!("removed header schema `{}`", schema.name));
+            continue;
+        };
+        for field in &schema.fields {
+            match current
+                .fields
+                .iter()
+                .find(|candidate| candidate.name == field.name)
+            {
+                None => breaking.push(format!("removed field `{}.{}`", schema.name, field.name)),
+                Some(candidate)
+                    if candidate.offset != field.offset
+                        || candidate.length != field.length
+                        || candidate.format != field.format =>
+                {
+                    breaking.push(format!(
+                        "changed wire layout of `{}.{}`",
+                        schema.name, field.name
+                    ))
+                }
+                _ => {}
+            }
+        }
+    }
+    json!({"schema_version":"1.0","old":old.name,"new":new.name,"compatible":breaking.is_empty(),"breaking":breaking,"warnings":warnings})
+}
+
+pub fn property_cases_to_dsl(
+    protocol: &str,
+    schema: &Value,
+    count: usize,
+    seed: u64,
+) -> Result<String, String> {
+    let fields = schema
+        .get("fields")
+        .and_then(Value::as_object)
+        .ok_or("property schema requires a `fields` object")?;
+    let count = count.clamp(1, 10_000);
+    let mut state = seed.max(1);
+    let random = |state: &mut u64| {
+        *state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
+        *state
+    };
+    let mut out = format!("cases \"{protocol}\" {{\n");
+    for index in 0..count {
+        out.push_str(&format!("  case \"property-{}\" {{ vars {{", index + 1));
+        for (name, spec) in fields {
+            let kind = spec.get("type").and_then(Value::as_str).unwrap_or("string");
+            let value = if let Some(values) = spec.get("values").and_then(Value::as_array) {
+                values
+                    .get((random(&mut state) as usize) % values.len().max(1))
+                    .cloned()
+                    .unwrap_or(Value::Null)
+            } else if matches!(kind, "integer" | "number") {
+                let min = spec.get("min").and_then(Value::as_i64).unwrap_or(0);
+                let max = spec
+                    .get("max")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(100)
+                    .max(min);
+                let boundaries = [min, max, 0, 1, -1]
+                    .into_iter()
+                    .filter(|value| *value >= min && *value <= max)
+                    .collect::<Vec<_>>();
+                Value::from(boundaries.get(index).copied().unwrap_or_else(|| {
+                    min + (random(&mut state) % (max.saturating_sub(min) as u64 + 1)) as i64
+                }))
+            } else if kind == "boolean" {
+                Value::Bool(index % 2 == 0)
+            } else {
+                let min = spec.get("min_length").and_then(Value::as_u64).unwrap_or(0) as usize;
+                let max = spec
+                    .get("max_length")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(16)
+                    .max(min as u64) as usize;
+                let length = if index == 0 {
+                    min
+                } else if index == 1 {
+                    max
+                } else {
+                    min + random(&mut state) as usize % (max - min + 1)
+                };
+                let text = if kind == "hex" {
+                    (0..length)
+                        .map(|_| format!("{:02x}", random(&mut state) as u8))
+                        .collect()
+                } else {
+                    (0..length)
+                        .map(|_| char::from(b'a' + (random(&mut state) % 26) as u8))
+                        .collect()
+                };
+                Value::String(text)
+            };
+            out.push_str(&format!(
+                " {name} = {}",
+                serde_json::to_string(&value).unwrap()
+            ));
+        }
+        out.push_str(" } tags = [\"generated\", \"property\"] expect = \"pass\" }\n");
+    }
+    out.push_str("}\n");
+    Ok(out)
 }
 
 pub fn tcpform_to_proto(protocol: &crate::Protocol) -> String {
@@ -589,10 +783,19 @@ mod tests {
     #[test]
     fn schema_generators_emit_valid_dsl_and_dissector() {
         let source = openapi_to_tcpform(&json!({"paths":{"/pets":{"get":{}}}})).unwrap();
-        assert!(crate::parse_file(&source).is_ok());
-        assert!(protobuf_to_tcpform("message Pet { string name = 1; }")
-            .unwrap()
-            .contains("protocol \"pet\""));
+        for source in [
+            source,
+            protobuf_to_tcpform("message Pet { string name = 1; }").unwrap(),
+        ] {
+            let blocks = crate::parse_file(&source).unwrap();
+            let protocols = crate::model::interpret(&blocks).unwrap();
+            let cases = crate::model::interpret_cases(&blocks).unwrap();
+            assert!(crate::Engine::new(protocols[0].clone())
+                .unwrap()
+                .run_cases(&cases[0].cases)
+                .iter()
+                .all(|result| result.passed));
+        }
         let blocks =
             crate::parse_file(include_str!("../examples/custom_header_schema.tcpf")).unwrap();
         let protocol = crate::model::interpret(&blocks).unwrap().remove(0);
@@ -607,6 +810,31 @@ mod tests {
         assert!(scapy.contains("BitField(\"kind\""));
         assert!(scapy.contains("StrFixedLenField(\"label\""));
         assert!(scapy.contains("dport=9000"));
+    }
+    #[test]
+    fn dsl_compatibility_and_property_generation_report_real_changes() {
+        let protocol = |source: &str| {
+            crate::model::interpret(&crate::parse_file(source).unwrap())
+                .unwrap()
+                .remove(0)
+        };
+        let old = protocol("protocol \"p\" { step \"send\" { role=\"a\" action=\"send\" } }");
+        let compatible = protocol("protocol \"p\" { step \"send\" { role=\"a\" action=\"send\" } step \"log\" { role=\"a\" action=\"log\" } }");
+        let breaking = protocol("protocol \"p\" { step \"send\" { role=\"b\" action=\"recv\" } }");
+        assert_eq!(
+            protocol_compatibility(&old, &compatible)["compatible"],
+            true
+        );
+        assert_eq!(protocol_compatibility(&old, &breaking)["compatible"], false);
+        let cases = property_cases_to_dsl("p", &json!({"fields":{"code":{"type":"integer","min":0,"max":2},"payload":{"type":"hex","max_length":2}}}), 5, 7).unwrap();
+        let parsed = crate::parse_file(&cases).unwrap();
+        assert_eq!(
+            crate::model::interpret_cases(&parsed).unwrap()[0]
+                .cases
+                .len(),
+            5
+        );
+        assert_eq!(cases, property_cases_to_dsl("p", &json!({"fields":{"code":{"type":"integer","min":0,"max":2},"payload":{"type":"hex","max_length":2}}}), 5, 7).unwrap());
     }
     #[test]
     fn aggregation_deduplicates() {

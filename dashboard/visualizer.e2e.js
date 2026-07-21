@@ -46,6 +46,8 @@ test('loads imported tcpf bundle, edits with line diagnostics, and keeps run his
   await expect(page.locator('#editor-status')).toContainText('browser_bundle_library.tcpf:2:');
   await page.locator('#source-editor').fill('protocol "fixed" {\n  step "x" { role = "a" action = "send" }\n}');
   await expect(page.locator('#title')).toHaveText('fixed');
+  await page.locator('#run-wasm').click();
+  await expect(page.locator('#editor-status')).toContainText('browser WASM');
   await expect(page.locator('#history .history-card').first()).toContainText(/baseline|unchanged/);
 });
 
@@ -66,6 +68,8 @@ test('imports PCAP, controls timeline, and decodes a custom header schema', asyn
   await page.locator('#capture-dsl').click();
   await expect(page.locator('#capture-dsl-output')).toHaveValue(/protocol "custom_header_demo_capture"/);
   await expect(page.locator('#capture-dsl-output')).toHaveValue(/initiator/);
+  await page.locator('#add-capture-field').click();
+  await expect(page.locator('#capture-field-editor [data-capture-field]')).toHaveCount(1);
   const rawFrame = '00112233445566778899aabb08004500002000010000401100000102030405060708003514e9000c000064617461';
   const generated = await page.evaluate(frame => window.tcpformAdvanced.captureToDsl([{ wire_hex: frame }], 'raw_generated'), rawFrame);
   expect(generated).toContain('action="send_raw"');
@@ -96,6 +100,9 @@ test('imports and filters shared team results, reports flakes, and compares runs
   const runs = await (await page.request.get(`/api/v1/runs?protocol=${protocol}&branch=main`)).json();
   const comparison = await (await page.request.get(`/api/v1/runs/compare?base=${runs.runs[1].id}&current=${runs.runs[0].id}`)).json();
   expect(comparison.comparison.status_changed).toBeTruthy();
+  await page.goto('/');
+  await page.locator('#preview-retention').click();
+  await expect(page.locator('#retention-status')).toContainText(/KiB.*records/);
 });
 
 test('uses timestamp playback, time axis, breakpoints, statistics and coverage', async ({ page }) => {

@@ -401,6 +401,23 @@ impl Store {
         Ok(rows)
     }
 
+    pub fn corpus_regression_bundle(&self, fingerprint: &str) -> Result<Option<Value>, String> {
+        let entry = self
+            .list_corpus(10_000)?
+            .into_iter()
+            .find(|value| value["fingerprint"] == fingerprint);
+        Ok(entry.and_then(|entry| {
+            let document = &entry["document"];
+            Some(json!({
+                "format":"tcpform-regression-case","version":1,
+                "name":format!("regression-{}", &fingerprint[..fingerprint.len().min(12)]),
+                "fingerprint":fingerprint,"protocol":entry["protocol"],
+                "expected_status":"ok","sources":document.get("sources")?.clone(),
+                "root":document.get("root")?.clone(),"original_failure":document.clone()
+            }))
+        }))
+    }
+
     pub fn create_share(
         &self,
         document: &Value,
@@ -445,15 +462,58 @@ impl Store {
         let cutoff = now().saturating_sub((retention_days.saturating_mul(86_400)) as i64);
         let connection = self.connection()?;
         let mut removed = 0;
-        for table in ["runs", "baselines", "annotations", "audit_log"] {
+        for (table, column) in [
+            ("runs", "created_at"),
+            ("baselines", "created_at"),
+            ("annotations", "created_at"),
+            ("audit_log", "created_at"),
+            ("jobs", "created_at"),
+            ("corpus", "last_seen"),
+            ("shares", "created_at"),
+        ] {
             removed += connection
                 .execute(
-                    &format!("DELETE FROM {table} WHERE created_at < ?1"),
+                    &format!("DELETE FROM {table} WHERE {column} < ?1"),
                     params![cutoff],
                 )
                 .map_err(|error| error.to_string())?;
         }
         Ok(removed)
+    }
+
+    pub fn retention_status(&self, retention_days: u64) -> Result<Value, String> {
+        let cutoff = now().saturating_sub((retention_days.saturating_mul(86_400)) as i64);
+        let connection = self.connection()?;
+        let mut tables = serde_json::Map::new();
+        for (table, column) in [
+            ("runs", "created_at"),
+            ("baselines", "created_at"),
+            ("annotations", "created_at"),
+            ("audit_log", "created_at"),
+            ("jobs", "created_at"),
+            ("corpus", "last_seen"),
+            ("shares", "created_at"),
+        ] {
+            let total: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .map_err(|error| error.to_string())?;
+            let expired: i64 = connection
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE {column} < ?1"),
+                    params![cutoff],
+                    |row| row.get(0),
+                )
+                .map_err(|error| error.to_string())?;
+            tables.insert(table.into(), json!({"total":total,"expired":expired}));
+        }
+        let bytes = std::fs::metadata(&self.path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        Ok(
+            json!({"retention_days":retention_days,"cutoff":cutoff,"database_bytes":bytes,"tables":tables}),
+        )
     }
 }
 
@@ -787,6 +847,16 @@ mod tests {
         assert_eq!(summary["success_rate"], 0.5);
         assert_eq!(summary["p95_duration_us"], 300);
         assert_eq!(summary["flaky_tests"], json!(["roundtrip"]));
+        let retention = store.retention_status(30).unwrap();
+        assert_eq!(retention["tables"]["runs"]["total"], 2);
+        assert_eq!(store.prune(30).unwrap(), 0);
+        let fingerprint = store.record_corpus("wire", &json!({"sources":{"protocol.tcpf":"protocol \"wire\" { step \"x\" { role=\"a\" action=\"send\" } }"},"root":"protocol.tcpf","manifest":{"protocol":{"name":"wire"}}})).unwrap();
+        let regression = store
+            .corpus_regression_bundle(&fingerprint)
+            .unwrap()
+            .unwrap();
+        assert_eq!(regression["expected_status"], "ok");
+        assert_eq!(regression["format"], "tcpform-regression-case");
 
         let (protocol, status, document, metadata) = normalize_run_import("junit", &Value::String("<testsuite><testcase name=\"passes\"/><testcase name=\"fails\"><failure/></testcase></testsuite>".into())).unwrap();
         assert_eq!(protocol, "junit");
