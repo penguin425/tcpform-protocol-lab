@@ -6,6 +6,27 @@ All notable changes to tcpform are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-22
+
+### Added
+
+- Create runnable protocol projects interactively with `tcpform new` and
+  inspect execution traces with the scriptable DSL debugger.
+- Review and edit inferred PCAP field boundaries before regenerating runnable
+  DSL, alongside the existing Wireshark round-trip tools.
+- Generate runnable tests from OpenAPI and Protobuf specifications, compare DSL
+  compatibility, and produce deterministic property cases.
+- Detect statistically significant latency regressions, run time-bounded local
+  endurance tests, and enforce the results in CI.
+- Share, compare, retain, prune, and export team run data and failure regression
+  bundles from the dashboard API.
+- Execute the portable DSL subset directly in the browser using a reproducible
+  WebAssembly engine.
+
+### Fixed
+
+- Make PCAP frame assertions independent of concurrent trace event ordering.
+
 ## [0.7.2] - 2026-07-19
 
 ### Added
