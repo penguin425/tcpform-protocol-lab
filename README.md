@@ -57,6 +57,10 @@ tcpform validate protocol.tcpf
 tcpform test protocol.tcpf
 ```
 
+For a custom skeleton, `tcpform new my-protocol` prompts for transport,
+framing, role names, smoke tests, and GitHub Actions. CI and scripts can pass
+the same choices with flags plus `--non-interactive`.
+
 The generated project includes a versioned DSL file, smoke case, formatter
 configuration, README, and GitHub Actions workflow. On pull requests, CI posts
 or updates one differential report covering success rate, P95 latency, packet
@@ -79,6 +83,7 @@ them with `tcpform ci-report base.json current.json --markdown report.md`.
 ```text
 tcpform validate <file>                # parse + validate every protocol
 tcpform init demo --template websocket # scaffold a protocol project and CI
+tcpform new demo                       # interactive custom protocol wizard
 tcpform template list                  # list built-in protocol templates
 tcpform template search mqtt           # search the configured external registry
 tcpform template add owner/mqtt        # verify, cache, and lock an external template
@@ -256,7 +261,10 @@ uses repeated same-direction payloads to propose fixed and variable field
 boundaries as `header_schema` blocks. It also generates endpoint/header
 comments, timing delays, payload hex, send/receive steps, and a smoke case.
 `--analysis` writes the session states, inferred fields, confidence scores, and
-sample values as JSON for review or downstream tooling. Treat all inferred DSL
+sample values as JSON for review or downstream tooling. The dashboard review
+screen allows session selection and editing of directions and role names,
+shows inferred boundaries and request/response pairs, and can apply the result
+to the integrated editor. Treat all inferred DSL
 and field boundaries as hypotheses: captures may be incomplete and may contain
 credentials or other sensitive payloads.
 
@@ -902,6 +910,11 @@ in both the alignment view and packet inspector. Captures can also generate a
 reviewable DSL template: Ethernet/IPv4/TCP/UDP packets become dependent
 `send_raw`/`recv_raw` pairs, while unknown link formats retain exact hex in
 ordinary send/receive pairs.
+
+Team runs are persisted in SQLite and can be filtered by protocol, branch,
+commit, environment, status, and time. The dashboard shows success trends,
+P95 duration, flaky tests, and two-run comparisons. JUnit XML, SARIF, and OTLP
+JSON results can be imported through the dashboard or `POST /api/v1/runs/import`.
 
 The packet lab links hex, ASCII, individual bits, standard header fields, and
 custom `header_schema` fields. Editable MAC, IPv4, TCP, and UDP values update

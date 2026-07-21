@@ -1134,6 +1134,26 @@ fn all_examples_run_to_completion() {
     assert!(ran >= 30, "expected to run >=30 protocols, ran {ran}");
 }
 
+/// Delayed example traffic must not depend on host scheduler timing. This
+/// specifically guards the macOS CI failure that occurred when a 100 ms
+/// receive timeout raced a delayed send on the real clock.
+#[test]
+fn advanced_actions_is_deterministic_under_repetition() {
+    let source = std::fs::read_to_string("examples/advanced_actions.tcpf").unwrap();
+    for attempt in 1..=100 {
+        let blocks = tcpform::parse_file(&source).unwrap();
+        let protocols = interpret(&blocks).unwrap();
+        let trace = Engine::new(protocols[0].clone())
+            .unwrap()
+            .run()
+            .unwrap_or_else(|error| panic!("attempt {attempt}: {error}"));
+        assert!(
+            trace.iter().all(|event| event.ok),
+            "attempt {attempt}: {trace:#?}"
+        );
+    }
+}
+
 /// Regression guard: every `cases` suite in `examples/*.tcpf` must have all
 /// its cases pass when run via `Engine::run_cases`.
 #[test]

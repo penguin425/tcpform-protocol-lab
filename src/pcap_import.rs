@@ -62,6 +62,34 @@ pub struct FieldInference {
     pub examples_hex: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct CaptureReview {
+    pub schema_version: &'static str,
+    pub protocol: String,
+    pub sessions: Vec<SessionInference>,
+    pub packets: Vec<ReviewPacket>,
+    pub fields: Vec<FieldInference>,
+    pub warnings: Vec<String>,
+    pub generated_dsl: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ReviewPacket {
+    pub index: usize,
+    pub session: String,
+    pub timestamp_ns: u64,
+    pub source: String,
+    pub destination: String,
+    pub transport: String,
+    pub direction: String,
+    pub sender_role: String,
+    pub receiver_role: String,
+    pub flags: Vec<String>,
+    pub payload_hex: String,
+    pub payload_length: usize,
+    pub paired_with: Option<usize>,
+}
+
 pub fn import_capture(bytes: &[u8], protocol: &str) -> Result<String, String> {
     validate_name(protocol)?;
     let packets = decode_capture(bytes)?;
@@ -77,6 +105,65 @@ pub fn analyze_capture(bytes: &[u8]) -> Result<CaptureInference, String> {
         return Err("capture contains no supported IPv4/IPv6 TCP or UDP packets".into());
     }
     Ok(analyze_packets(&packets))
+}
+
+pub fn review_capture(bytes: &[u8], protocol: &str) -> Result<CaptureReview, String> {
+    validate_name(protocol)?;
+    let packets = decode_capture(bytes)?;
+    if packets.is_empty() {
+        return Err("capture contains no supported IPv4/IPv6 TCP or UDP packets".into());
+    }
+    let inference = analyze_packets(&packets);
+    let mut review = Vec::with_capacity(packets.len());
+    for (index, packet) in packets.iter().enumerate() {
+        let source = format!("{}:{}", packet.source, packet.source_port);
+        let destination = format!("{}:{}", packet.destination, packet.destination_port);
+        let session = inference.sessions.iter().find(|candidate| {
+            (candidate.client == source && candidate.server == destination)
+                || (candidate.client == destination && candidate.server == source)
+        });
+        let from_client = session.is_none_or(|candidate| candidate.client == source);
+        review.push(ReviewPacket {
+            index: index + 1,
+            session: session
+                .map(|value| value.id.clone())
+                .unwrap_or_else(|| "session-1".into()),
+            timestamp_ns: packet.timestamp_ns,
+            source,
+            destination,
+            transport: packet.transport.clone(),
+            direction: if from_client { "request" } else { "response" }.into(),
+            sender_role: if from_client { "client" } else { "server" }.into(),
+            receiver_role: if from_client { "server" } else { "client" }.into(),
+            flags: packet.flags.clone(),
+            payload_hex: crate::bytes_to_hex(&packet.payload),
+            payload_length: packet.payload.len(),
+            paired_with: None,
+        });
+    }
+    for index in 0..review.len() {
+        if review[index].payload_length == 0 || review[index].paired_with.is_some() {
+            continue;
+        }
+        if let Some(peer) = (index + 1..review.len()).find(|peer| {
+            review[*peer].session == review[index].session
+                && review[*peer].payload_length > 0
+                && review[*peer].direction != review[index].direction
+                && review[*peer].paired_with.is_none()
+        }) {
+            review[index].paired_with = Some(peer + 1);
+            review[peer].paired_with = Some(index + 1);
+        }
+    }
+    Ok(CaptureReview {
+        schema_version: "1.0",
+        protocol: protocol.into(),
+        sessions: inference.sessions,
+        packets: review,
+        fields: inference.fields,
+        warnings: inference.warnings,
+        generated_dsl: render_dsl(&packets, protocol),
+    })
 }
 
 pub fn decode_capture(bytes: &[u8]) -> Result<Vec<CapturedPacket>, String> {
@@ -847,6 +934,17 @@ mod tests {
         assert_eq!(packets[0].destination_port, 53);
         assert_eq!(packets[0].payload, b"dns");
         assert_eq!(packets[0].timestamp_ns, 123_000);
+    }
+
+    #[test]
+    fn review_model_exposes_editable_packet_metadata_and_dsl() {
+        let review = review_capture(&ipv4_udp_capture(), "dns_review").unwrap();
+        assert_eq!(review.schema_version, "1.0");
+        assert_eq!(review.sessions.len(), 1);
+        assert_eq!(review.packets[0].direction, "request");
+        assert_eq!(review.packets[0].sender_role, "client");
+        assert_eq!(review.packets[0].payload_hex, "646e73");
+        assert!(review.generated_dsl.contains("protocol \"dns_review\""));
     }
 
     #[test]

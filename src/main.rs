@@ -10,7 +10,7 @@
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -37,6 +37,7 @@ fn main() {
         "fmt" => cmd_fmt(&args[2..]),
         "migrate" => cmd_migrate(&args[2..]),
         "init" => cmd_init(&args[2..]),
+        "new" => cmd_new(&args[2..]),
         "template" => cmd_template(&args[2..]),
         "schema" => cmd_schema(&args[2..]),
         "snapshot" => cmd_snapshot(&args[2..]),
@@ -100,6 +101,7 @@ fn usage() {
          tcpform fmt [--check|--write] [--stdin] [--config <file>] [--indent <n>] [--align] [--expand-inline] <file...>\n  \
          tcpform migrate [--check|--write] <file>\n  \
          tcpform init [directory] [--name <name>] [--template <name>] [--force]\n  \
+         tcpform new [directory] [--name <name>] [--transport <tcp|udp>] [--framing <raw|line|length-prefixed>] [--client-role <name>] [--server-role <name>] [--no-tests] [--no-github-actions] [--non-interactive] [--force]\n  \
          tcpform template <list|show <name>|search <query>|add <owner/name>> [--registry <file>]\n  \
          tcpform schema dsl [--output <file>]\n  \
          tcpform schema decode <source> <protocol> <schema> --hex <bytes>\n  \
@@ -1038,6 +1040,131 @@ fn cmd_init(args: &[String]) -> Result<(), String> {
         println!("created {}", path.display());
     }
     Ok(())
+}
+
+fn cmd_new(args: &[String]) -> Result<(), String> {
+    let mut directory: Option<String> = None;
+    let mut options = tcpform::templates::NewProjectOptions::default();
+    let mut name_set = false;
+    let mut transport_set = false;
+    let mut framing_set = false;
+    let mut client_set = false;
+    let mut server_set = false;
+    let mut interactive = std::io::stdin().is_terminal();
+    let mut force = false;
+    let mut index = 0;
+    while index < args.len() {
+        let value = args[index].as_str();
+        let next = |index: &mut usize| -> Result<&str, String> {
+            *index += 1;
+            args.get(*index)
+                .map(String::as_str)
+                .ok_or_else(|| format!("{value} requires a value"))
+        };
+        match value {
+            "--name" => {
+                options.project_name = next(&mut index)?.into();
+                name_set = true;
+            }
+            "--transport" => {
+                options.transport = next(&mut index)?.into();
+                transport_set = true;
+            }
+            "--framing" => {
+                options.framing = next(&mut index)?.into();
+                framing_set = true;
+            }
+            "--client-role" => {
+                options.client_role = next(&mut index)?.into();
+                client_set = true;
+            }
+            "--server-role" => {
+                options.server_role = next(&mut index)?.into();
+                server_set = true;
+            }
+            "--no-tests" => options.include_tests = false,
+            "--no-github-actions" => options.include_github_actions = false,
+            "--non-interactive" => interactive = false,
+            "--force" => force = true,
+            value if !value.starts_with('-') && directory.is_none() => {
+                directory = Some(value.into())
+            }
+            value => return Err(format!("unknown new argument `{value}`")),
+        }
+        index += 1;
+    }
+    if interactive {
+        if !name_set {
+            options.project_name = prompt("Project name", &options.project_name)?;
+        }
+        if !transport_set {
+            options.transport = prompt("Transport (tcp/udp)", &options.transport)?;
+        }
+        if !framing_set {
+            options.framing = prompt("Framing (raw/line/length-prefixed)", &options.framing)?;
+        }
+        if !client_set {
+            options.client_role = prompt("Client role", &options.client_role)?;
+        }
+        if !server_set {
+            options.server_role = prompt("Server role", &options.server_role)?;
+        }
+        options.include_tests = prompt_yes_no("Create smoke test", options.include_tests)?;
+        options.include_github_actions = prompt_yes_no(
+            "Create GitHub Actions workflow",
+            options.include_github_actions,
+        )?;
+    } else if !name_set {
+        if let Some(path) = directory.as_deref() {
+            options.project_name = std::path::Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("tcpform-project")
+                .into();
+        }
+    }
+    let directory = directory.unwrap_or_else(|| options.project_name.clone());
+    for path in tcpform::templates::new_project(std::path::Path::new(&directory), &options, force)?
+    {
+        println!("created {}", path.display());
+    }
+    println!("\nNext: cd {directory} && tcpform validate protocol.tcpf");
+    Ok(())
+}
+
+fn prompt(label: &str, default: &str) -> Result<String, String> {
+    print!("{label} [{default}]: ");
+    std::io::stdout()
+        .flush()
+        .map_err(|error| error.to_string())?;
+    let mut input = String::new();
+    std::io::stdin()
+        .read_line(&mut input)
+        .map_err(|error| error.to_string())?;
+    let value = input.trim();
+    Ok(if value.is_empty() {
+        default.into()
+    } else {
+        value.into()
+    })
+}
+
+fn prompt_yes_no(label: &str, default: bool) -> Result<bool, String> {
+    let hint = if default { "Y/n" } else { "y/N" };
+    print!("{label} [{hint}]: ");
+    std::io::stdout()
+        .flush()
+        .map_err(|error| error.to_string())?;
+    let mut input = String::new();
+    std::io::stdin()
+        .read_line(&mut input)
+        .map_err(|error| error.to_string())?;
+    match input.trim().to_ascii_lowercase().as_str() {
+        "" => Ok(default),
+        "y" | "yes" => Ok(true),
+        "n" | "no" => Ok(false),
+        _ => Err(format!("{label} expects yes or no")),
+    }
 }
 
 fn cmd_template(args: &[String]) -> Result<(), String> {
@@ -2217,11 +2344,101 @@ fn serve_request(stream: &mut TcpStream, state: &ServerState) -> Result<(), Stri
             if let Err(error) = state.authorize(&headers, "view", false) {
                 return api_error(stream, "401 Unauthorized", &error);
             }
+            let filter = run_filter_from_path(&path)?;
             json_response(
                 stream,
                 "200 OK",
-                &serde_json::json!({"schema_version":"1.0","runs":state.store.list_runs(None, 100)?}),
+                &serde_json::json!({"schema_version":"1.0","runs":state.store.list_runs_filtered(&filter)?}),
             )
+        }
+        ("GET", "/api/v1/runs/summary") => {
+            if let Err(error) = state.authorize(&headers, "view", false) {
+                return api_error(stream, "401 Unauthorized", &error);
+            }
+            let filter = run_filter_from_path(&path)?;
+            json_response(
+                stream,
+                "200 OK",
+                &serde_json::json!({"schema_version":"1.0","summary":state.store.run_summary(&filter)?}),
+            )
+        }
+        ("GET", "/api/v1/runs/compare") => {
+            if let Err(error) = state.authorize(&headers, "view", false) {
+                return api_error(stream, "401 Unauthorized", &error);
+            }
+            let query = query_values(&path);
+            let base = query.get("base").ok_or("base run id required")?;
+            let current = query.get("current").ok_or("current run id required")?;
+            let base_run = state.store.get_run(base)?.ok_or("base run not found")?;
+            let current_run = state
+                .store
+                .get_run(current)?
+                .ok_or("current run not found")?;
+            let comparison = compare_run_documents(&base_run, &current_run);
+            json_response(
+                stream,
+                "200 OK",
+                &serde_json::json!({"schema_version":"1.0","comparison":comparison}),
+            )
+        }
+        ("POST", "/api/v1/runs/import") => {
+            let identity = match state.authorize(&headers, "run", true) {
+                Ok(value) => value,
+                Err(error) => return api_error(stream, "403 Forbidden", &error),
+            };
+            let value: serde_json::Value =
+                serde_json::from_slice(body).map_err(|error| format!("invalid JSON: {error}"))?;
+            let format = value
+                .get("format")
+                .and_then(|value| value.as_str())
+                .ok_or("format required")?;
+            let (default_protocol, status, document, mut metadata) =
+                tcpform::storage::normalize_run_import(
+                    format,
+                    value.get("content").ok_or("content required")?,
+                )?;
+            let protocol = value
+                .get("protocol")
+                .and_then(|value| value.as_str())
+                .unwrap_or(&default_protocol);
+            metadata.branch = value
+                .get("branch")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
+            metadata.commit = value
+                .get("commit")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
+            metadata.environment = value
+                .get("environment")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
+            metadata.duration_us = value.get("duration_us").and_then(|value| value.as_u64());
+            let id = state
+                .store
+                .save_run_with_metadata(protocol, &status, &document, &metadata)?;
+            state
+                .store
+                .audit(&identity.0, "import", &id, "ok", format)?;
+            json_response(
+                stream,
+                "201 Created",
+                &serde_json::json!({"id":id,"status":status}),
+            )
+        }
+        ("GET", route) if route.starts_with("/api/v1/runs/") => {
+            if let Err(error) = state.authorize(&headers, "view", false) {
+                return api_error(stream, "401 Unauthorized", &error);
+            }
+            let id = route.trim_start_matches("/api/v1/runs/");
+            match state.store.get_run(id)? {
+                Some(run) => json_response(
+                    stream,
+                    "200 OK",
+                    &serde_json::json!({"schema_version":"1.0","run":run}),
+                ),
+                None => api_error(stream, "404 Not Found", "run not found"),
+            }
         }
         ("GET", "/api/v1/corpus") => {
             if let Err(error) = state.authorize(&headers, "view", false) {
@@ -2352,6 +2569,28 @@ fn serve_request(stream: &mut TcpStream, state: &ServerState) -> Result<(), Stri
                 .audit(&identity.0, "create", &id, "ok", "annotation")?;
             json_response(stream, "201 Created", &serde_json::json!({"id":id}))
         }
+        ("POST", "/api/v1/pcap/review") => {
+            if let Err(error) = state.authorize(&headers, "run", true) {
+                return api_error(stream, "403 Forbidden", &error);
+            }
+            let value: serde_json::Value =
+                serde_json::from_slice(body).map_err(|error| format!("invalid JSON: {error}"))?;
+            let protocol = value
+                .get("protocol")
+                .and_then(|value| value.as_str())
+                .unwrap_or("pcap_import");
+            let capture = value
+                .get("capture_hex")
+                .and_then(|value| value.as_str())
+                .ok_or("capture_hex required")?;
+            let bytes = hex_decode(capture)?;
+            let review = tcpform::pcap_import::review_capture(&bytes, protocol)?;
+            json_response(
+                stream,
+                "200 OK",
+                &serde_json::to_value(review).map_err(|error| error.to_string())?,
+            )
+        }
         ("POST", "/api/visualize") => {
             if let Err(error) = state.authorize(&headers, "run", true) {
                 return api_error(stream, "403 Forbidden", &error);
@@ -2365,7 +2604,6 @@ fn serve_request(stream: &mut TcpStream, state: &ServerState) -> Result<(), Stri
                             .and_then(|v| v.get("name"))
                             .and_then(|v| v.as_str())
                             .unwrap_or("unknown");
-                        let _ = state.store.save_run(protocol, "ok", &value);
                         let failed = value
                             .get("documents")
                             .and_then(|v| v.as_object())
@@ -2374,6 +2612,48 @@ fn serve_request(stream: &mut TcpStream, state: &ServerState) -> Result<(), Stri
                                     document.get("status").and_then(|v| v.as_str()) == Some("fail")
                                 })
                             });
+                        let status = if failed { "fail" } else { "ok" };
+                        let request =
+                            serde_json::from_slice::<serde_json::Value>(body).unwrap_or_default();
+                        let metadata = tcpform::storage::RunMetadata {
+                            branch: request
+                                .get("branch")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_string),
+                            commit: request
+                                .get("commit")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_string),
+                            environment: request
+                                .get("environment")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_string),
+                            source: Some("tcpform".into()),
+                            duration_us: value
+                                .get("documents")
+                                .and_then(|value| value.as_object())
+                                .map(|documents| {
+                                    documents
+                                        .values()
+                                        .flat_map(|document| {
+                                            document
+                                                .get("events")
+                                                .and_then(|value| value.as_array())
+                                                .into_iter()
+                                                .flatten()
+                                        })
+                                        .filter_map(|event| {
+                                            event
+                                                .get("timestamp_us")
+                                                .and_then(|value| value.as_u64())
+                                        })
+                                        .max()
+                                        .unwrap_or(0)
+                                }),
+                        };
+                        let _ = state
+                            .store
+                            .save_run_with_metadata(protocol, status, &value, &metadata);
                         if failed {
                             let _ = state.store.record_corpus(protocol, &value);
                         }
@@ -2396,6 +2676,126 @@ fn serve_request(stream: &mut TcpStream, state: &ServerState) -> Result<(), Stri
         }
         _ => http_response(stream, "404 Not Found", "text/plain", b"not found"),
     }
+}
+
+fn query_values(path: &str) -> HashMap<String, String> {
+    path.split_once('?')
+        .map(|(_, query)| {
+            query
+                .split('&')
+                .filter_map(|pair| {
+                    let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+                    (!key.is_empty()).then(|| {
+                        (
+                            percent_decode(key),
+                            percent_decode(&value.replace('+', " ")),
+                        )
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let decoded = std::str::from_utf8(&bytes[index + 1..index + 3])
+                .ok()
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+            if let Some(byte) = decoded {
+                output.push(byte);
+                index += 3;
+                continue;
+            }
+        }
+        output.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&output).into_owned()
+}
+
+fn run_filter_from_path(path: &str) -> Result<tcpform::storage::RunFilter, String> {
+    let query = query_values(path);
+    let string = |name: &str| query.get(name).filter(|value| !value.is_empty()).cloned();
+    let number = |name: &str| -> Result<Option<i64>, String> {
+        query
+            .get(name)
+            .map(|value| {
+                value
+                    .parse::<i64>()
+                    .map_err(|_| format!("{name} must be an integer"))
+            })
+            .transpose()
+    };
+    Ok(tcpform::storage::RunFilter {
+        protocol: string("protocol"),
+        branch: string("branch"),
+        commit: string("commit"),
+        environment: string("environment"),
+        status: string("status"),
+        from: number("from")?,
+        to: number("to")?,
+        limit: query
+            .get("limit")
+            .map(|value| {
+                value
+                    .parse::<usize>()
+                    .map_err(|_| "limit must be an integer".to_string())
+            })
+            .transpose()?
+            .unwrap_or(100),
+    })
+}
+
+fn compare_run_documents(
+    base: &serde_json::Value,
+    current: &serde_json::Value,
+) -> serde_json::Value {
+    let outcomes = |run: &serde_json::Value| {
+        let mut values = HashMap::new();
+        if let Some(documents) = run
+            .pointer("/document/documents")
+            .and_then(|value| value.as_object())
+        {
+            for (name, document) in documents {
+                let failed = document.get("status").and_then(|value| value.as_str())
+                    == Some("fail")
+                    || document
+                        .get("events")
+                        .and_then(|value| value.as_array())
+                        .is_some_and(|events| {
+                            events.iter().any(|event| {
+                                event.get("ok") == Some(&serde_json::Value::Bool(false))
+                            })
+                        });
+                values.insert(name.clone(), if failed { "fail" } else { "pass" });
+            }
+        }
+        values
+    };
+    let before = outcomes(base);
+    let after = outcomes(current);
+    let mut names = before
+        .keys()
+        .chain(after.keys())
+        .cloned()
+        .collect::<Vec<_>>();
+    names.sort();
+    names.dedup();
+    let changes = names
+        .into_iter()
+        .filter_map(|name| {
+            let old = before.get(&name).copied().unwrap_or("missing");
+            let new = after.get(&name).copied().unwrap_or("missing");
+            (old != new).then(|| serde_json::json!({"test":name,"base":old,"current":new}))
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({"base":base["id"],"current":current["id"],"status_changed":base["status"] != current["status"],
+        "duration_delta_us":current["duration_us"].as_i64().unwrap_or(0)-base["duration_us"].as_i64().unwrap_or(0),"test_changes":changes})
 }
 
 fn uploaded_protocol(body: &[u8]) -> Result<Protocol, String> {
@@ -2689,6 +3089,11 @@ fn api_openapi() -> serde_json::Value {
             "/api/v1/jobs/{id}/cancel":{"post":{"summary":"Cancel a job"}},
             "/api/v1/jobs/{id}/retry":{"post":{"summary":"Retry a job"}},
             "/api/v1/runs":{"get":{"summary":"List persisted runs"}},
+            "/api/v1/runs/summary":{"get":{"summary":"Aggregate run trends and flaky tests"}},
+            "/api/v1/runs/compare":{"get":{"summary":"Compare two persisted runs"}},
+            "/api/v1/runs/import":{"post":{"summary":"Import JUnit, SARIF, or OTLP results"}},
+            "/api/v1/runs/{id}":{"get":{"summary":"Get a persisted run"}},
+            "/api/v1/pcap/review":{"post":{"summary":"Decode a capture and build an editable DSL review model"}},
             "/api/v1/corpus":{"get":{"summary":"List deduplicated failures"}},
             "/api/v1/corpus/revalidate":{"post":{"summary":"Queue regression corpus"}},
             "/api/v1/baselines":{"post":{"summary":"Create a baseline"}},
@@ -4537,5 +4942,22 @@ mod bundle_tests {
         assert!(verify_bundle_integrity(&bundle)
             .unwrap_err()
             .contains("main.tcpf"));
+    }
+
+    #[test]
+    fn shared_run_queries_decode_filters_and_compare_results() {
+        let filter = run_filter_from_path(
+            "/api/v1/runs?protocol=wire&branch=feature%2Freview&status=fail&limit=25",
+        )
+        .unwrap();
+        assert_eq!(filter.protocol.as_deref(), Some("wire"));
+        assert_eq!(filter.branch.as_deref(), Some("feature/review"));
+        assert_eq!(filter.limit, 25);
+        let base = serde_json::json!({"id":"a","status":"ok","duration_us":100,"document":{"documents":{"smoke":{"status":"ok"}}}});
+        let current = serde_json::json!({"id":"b","status":"fail","duration_us":160,"document":{"documents":{"smoke":{"status":"fail"}}}});
+        let comparison = compare_run_documents(&base, &current);
+        assert_eq!(comparison["status_changed"], true);
+        assert_eq!(comparison["duration_delta_us"], 60);
+        assert_eq!(comparison["test_changes"][0]["test"], "smoke");
     }
 }

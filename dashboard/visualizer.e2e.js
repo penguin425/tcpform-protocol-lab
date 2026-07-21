@@ -61,8 +61,11 @@ test('imports PCAP, controls timeline, and decodes a custom header schema', asyn
   capture.writeUInt32LE(packet.length, 32); capture.writeUInt32LE(packet.length, 36); packet.copy(capture, 40);
   await page.locator('#pcap-file').setInputFiles({ name: 'custom.pcap', mimeType: 'application/vnd.tcpdump.pcap', buffer: capture });
   await expect(page.locator('#capture-results')).toContainText('frame #1');
+  await expect(page.locator('#capture-review .capture-card').first()).toContainText('Direction');
+  await page.locator('[data-review-field="sender_role"]').first().fill('initiator');
   await page.locator('#capture-dsl').click();
   await expect(page.locator('#capture-dsl-output')).toHaveValue(/protocol "custom_header_demo_capture"/);
+  await expect(page.locator('#capture-dsl-output')).toHaveValue(/initiator/);
   const rawFrame = '00112233445566778899aabb08004500002000010000401100000102030405060708003514e9000c000064617461';
   const generated = await page.evaluate(frame => window.tcpformAdvanced.captureToDsl([{ wire_hex: frame }], 'raw_generated'), rawFrame);
   expect(generated).toContain('action="send_raw"');
@@ -77,6 +80,22 @@ test('imports PCAP, controls timeline, and decodes a custom header schema', asyn
   await expect(page.locator('#inspector')).toContainText('custom header schemas');
   await expect(page.locator('#inspector')).toContainText('AB');
   await expect(page.locator('#packet-lab .byte')).toHaveCount(4);
+});
+
+test('imports and filters shared team results, reports flakes, and compares runs', async ({ page }) => {
+  const protocol = `team_${Date.now()}`;
+  const importRun = (status, commit) => page.request.post('/api/v1/runs/import', { data: {
+    format: 'junit', protocol, branch: 'main', commit, environment: 'ci',
+    content: `<testsuite><testcase name="roundtrip">${status === 'fail' ? '<failure/>' : ''}</testcase></testsuite>`
+  }});
+  expect((await importRun('pass', 'abc')).ok()).toBeTruthy();
+  expect((await importRun('fail', 'def')).ok()).toBeTruthy();
+  const summary = await (await page.request.get(`/api/v1/runs/summary?protocol=${protocol}`)).json();
+  expect(summary.summary.total).toBe(2);
+  expect(summary.summary.flaky_tests).toContain('roundtrip');
+  const runs = await (await page.request.get(`/api/v1/runs?protocol=${protocol}&branch=main`)).json();
+  const comparison = await (await page.request.get(`/api/v1/runs/compare?base=${runs.runs[1].id}&current=${runs.runs[0].id}`)).json();
+  expect(comparison.comparison.status_changed).toBeTruthy();
 });
 
 test('uses timestamp playback, time axis, breakpoints, statistics and coverage', async ({ page }) => {
