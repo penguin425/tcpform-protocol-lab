@@ -6,9 +6,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
-const { protocolDeclarations, rewriteVisualizerHtml } = require('./helpers');
+const { protocolDeclarations, caseDeclarations, rewriteVisualizerHtml } = require('./helpers');
 
 let client;
+let testController;
 const executable = () => vscode.workspace.getConfiguration('tcpform').get('executable', 'tcpform');
 
 function execTcpform(args, options = {}) {
@@ -88,6 +89,54 @@ async function guarded(operation) {
   try { await operation(); } catch (error) { vscode.window.showErrorMessage(`tcpform: ${error.message || error}`); }
 }
 
+async function discoverTests(document) {
+  if (!testController || document.languageId !== 'tcpform') return;
+  const uri = document.uri;
+  const file = testController.items.get(uri.toString()) || testController.createTestItem(uri.toString(), path.basename(uri.fsPath), uri);
+  file.range = new vscode.Range(0, 0, 0, 0);
+  file.children.replace([]);
+  const protocols = new Map();
+  for (const item of caseDeclarations(document.getText())) {
+    let protocol = protocols.get(item.protocol);
+    if (!protocol) {
+      protocol = testController.createTestItem(`${uri}::${item.protocol}`, item.protocol, uri);
+      file.children.add(protocol);
+      protocols.set(item.protocol, protocol);
+    }
+    const child = testController.createTestItem(`${uri}::${item.protocol}::${item.name}`, item.name, uri);
+    child.range = new vscode.Range(item.line, 0, item.line, 0);
+    child.tcpform = { protocol: item.protocol, caseName: item.name };
+    protocol.children.add(child);
+  }
+  if (!testController.items.get(file.id)) testController.items.add(file);
+}
+
+function collectTestCases(item, output = []) {
+  if (item.tcpform) output.push(item);
+  item.children.forEach(child => collectTestCases(child, output));
+  return output;
+}
+
+async function runExplorerTests(request, token) {
+  const run = testController.createTestRun(request);
+  const roots = request.include ? [...request.include] : [...testController.items].map(([, item]) => item);
+  for (const item of roots.flatMap(root => collectTestCases(root))) {
+    if (token.isCancellationRequested) { run.skipped(item); continue; }
+    run.started(item);
+    try {
+      const stdout = await execTcpform(['test', '--json', '--case', `^${item.tcpform.caseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, item.uri.fsPath, item.tcpform.protocol]);
+      const report = JSON.parse(stdout);
+      const result = (report.results || report).find(value => value.case === item.tcpform.caseName || value.name === item.tcpform.caseName);
+      if (result && (result.passed === false || result.actual === 'fail')) run.failed(item, new vscode.TestMessage(result.error || result.detail || 'tcpform case failed'));
+      else run.passed(item);
+      run.appendOutput(stdout.replace(/\n/g, '\r\n'), undefined, item);
+    } catch (error) {
+      run.failed(item, new vscode.TestMessage(error.message || String(error)));
+    }
+  }
+  run.end();
+}
+
 async function activate(context) {
   const serverOptions = {
     run: { command: executable(), args: ['lsp'], transport: TransportKind.stdio },
@@ -98,6 +147,17 @@ async function activate(context) {
     synchronize: { fileEvents: vscode.workspace.createFileSystemWatcher('**/*.tcpf') },
   });
   context.subscriptions.push(client.start());
+  testController = vscode.tests.createTestController('tcpformCases', 'tcpform cases');
+  context.subscriptions.push(testController);
+  testController.createRunProfile('Run', vscode.TestRunProfileKind.Run, runExplorerTests, true);
+  for (const document of vscode.workspace.textDocuments) discoverTests(document);
+  context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(discoverTests));
+  context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => discoverTests(event.document)));
+  const testWatcher = vscode.workspace.createFileSystemWatcher('**/*.tcpf');
+  context.subscriptions.push(testWatcher);
+  testWatcher.onDidCreate(uri => vscode.workspace.openTextDocument(uri).then(discoverTests), null, context.subscriptions);
+  testWatcher.onDidChange(uri => vscode.workspace.openTextDocument(uri).then(discoverTests), null, context.subscriptions);
+  testWatcher.onDidDelete(uri => testController.items.delete(uri.toString()), null, context.subscriptions);
   context.subscriptions.push(vscode.languages.registerCodeLensProvider({ language: 'tcpform', scheme: 'file' }, new TcpformCodeLensProvider()));
   context.subscriptions.push(vscode.commands.registerCommand('tcpform.runProtocol', target => guarded(async () => {
     const value = await targetOrActive(target); if (value) await runTask('run', value.uri, value.protocol);

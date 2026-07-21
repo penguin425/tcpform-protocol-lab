@@ -13,6 +13,7 @@ refactoring, and formatting, and adds editor-native execution tools.
 - tcpform tasks with problem matching
 - Embedded Visualizer in a side-by-side webview
 - Automatic generation and refresh of the tcpform DSL v2 JSON Schema
+- Native Test Explorer discovery and individual execution for every DSL case
 
 Set `tcpform.executable` when `tcpform` is not on `PATH`. Commands are available
 from the Command Palette under `tcpform:`.

@@ -152,6 +152,10 @@ tcpform differential --left 127.0.0.1:8001 --right 127.0.0.1:8002 \
 - [x] Raw performance samples and statistical latency significance gate
 - [x] Retention/capacity preview and explicitly confirmed pruning UI
 - [x] Reproducibly built browser WebAssembly simulator for the portable subset
+- [x] Terminal run inspector, import-aware watch mode, and one-role TCP/UDP mock server
+- [x] HAR and bounded live-capture import, deterministic budgeted fault campaigns
+- [x] Read-only Git regression bisection and configurable DSL lint policy
+- [x] Guided local tutorial, VS Code Test Explorer, and portable execution report
 
 ## Live transports
 

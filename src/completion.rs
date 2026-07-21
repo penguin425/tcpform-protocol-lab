@@ -11,14 +11,14 @@ pub fn generate(shell: &str) -> Result<&'static str, String> {
 }
 
 #[cfg(test)]
-const COMMANDS: &str = "validate list plan visualize serve fmt migrate init new template schema spec snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore model-check observe standards perf generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor debug completion import-pcap import-kaitai packetdrill help";
+const COMMANDS: &str = "validate list plan visualize serve fmt migrate init new template schema spec snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore model-check observe standards perf generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor debug tui watch mock regression-bisect lint learn report completion import-pcap import-har capture-import import-kaitai packetdrill help";
 
 const BASH: &str = r#"_tcpform() {
   local cur prev commands
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
-  commands="validate list plan visualize serve fmt migrate init new template schema spec snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore model-check observe standards perf generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor debug completion import-pcap import-kaitai packetdrill help"
+  commands="validate list plan visualize serve fmt migrate init new template schema spec snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore model-check observe standards perf generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor debug tui watch mock regression-bisect lint learn report completion import-pcap import-har capture-import import-kaitai packetdrill help"
   case "$prev" in
     completion) COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") ); return ;;
     standards) COMPREPLY=( $(compgen -W "ttcn3-export ttcn3-import asn1-import" -- "$cur") ); return ;;
@@ -60,7 +60,11 @@ _tcpform() {
     'interop:test interoperability across multiple implementations'
     'platform:platform integrations' 'run:run a protocol' 'test:run case suites'
     'doctor:diagnose project and host' 'debug:step through a protocol trace' 'completion:generate shell completion' 'help:show help'
+    'tui:interactively inspect a protocol run' 'watch:rerun tests when DSL changes' 'mock:serve a protocol role'
+    'regression-bisect:find the first failing revision' 'lint:enforce DSL policy' 'learn:create tutorial lessons' 'report:create a standalone execution report'
     'import-pcap:generate starter DSL from PCAP or PCAPNG'
+    'import-har:generate runnable DSL from a HAR capture'
+    'capture-import:capture live traffic and generate runnable DSL'
     'import-kaitai:import a Kaitai Struct ksy schema'
     'packetdrill:import or export packetdrill packet scripts'
   )
@@ -81,6 +85,10 @@ _tcpform() {
     new) _arguments '1:directory:_files -/' '--name[project name]:name' '--transport[transport]:transport:(tcp udp)' '--framing[framing]:framing:(raw line length-prefixed)' '--client-role[client role]:role' '--server-role[server role]:role' '--no-tests[omit smoke tests]' '--no-github-actions[omit workflow]' '--non-interactive[use defaults without prompts]' '--force[overwrite generated files]' ;;
     doctor) _arguments '1:project directory:_files -/' '--json[emit JSON report]' ;;
     debug) _arguments '1:source:_files' '2:protocol' '*--break[stop at step]:step' '*--watch[watch event field]:field' '--commands[read commands from file]:file:_files' ;;
+    tui) _arguments '1:source:_files' '2:protocol' '--case[run one case]:case' '--commands[read commands from file]:file:_files' ;;
+    watch) _arguments '1:source:_files' '2:protocol' '--debounce-ms[change debounce]:milliseconds' '--once[run once and exit]' ;;
+    mock) _arguments '1:source:_files' '2:protocol' '--role[local role]:role' '--listen[listen address]:address' '--udp[use UDP]' '--framing[message framing]:kind:(raw line length)' '--sessions[serve N sessions]:count' '--forever[serve until interrupted]' ;;
+    lint) _arguments '1:source:_files' '--config[lint policy]:file:_files' '--json[emit JSON]' '--deny-warnings[fail on warnings]' ;;
     *) _arguments '*:file:_files' '--json[emit JSON]' '--output[output path]:path:_files' '--help[show help]' ;;
   esac
 }
