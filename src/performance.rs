@@ -13,6 +13,7 @@ pub struct PerformanceConfig {
     pub warmup: usize,
     pub jobs: usize,
     pub deadline_us: Option<u64>,
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +32,8 @@ pub struct ReportConfig {
     pub warmup: usize,
     pub jobs: usize,
     pub deadline_us: Option<u64>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,12 +57,16 @@ pub struct LatencyDistribution {
     pub p99: u64,
     pub max: u64,
     pub jitter_p99_p50: u64,
+    #[serde(default)]
+    pub values: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaselineComparison {
     pub p95_change_percent: f64,
     pub throughput_change_percent: f64,
+    pub latency_p_value: Option<f64>,
+    pub statistically_significant: bool,
 }
 
 #[derive(Debug)]
@@ -80,6 +87,9 @@ pub fn benchmark(
     if config.jobs == 0 {
         return Err("jobs must be at least 1".into());
     }
+    if config.duration_ms == Some(0) {
+        return Err("duration_ms must be at least 1".into());
+    }
     let mut real_protocol = protocol.clone();
     real_protocol.clock = ClockMode::Real;
     for _ in 0..config.warmup {
@@ -90,6 +100,9 @@ pub fn benchmark(
     let next = Arc::new(AtomicUsize::new(0));
     let samples = Arc::new(Mutex::new(Vec::with_capacity(config.iterations)));
     let started = Instant::now();
+    let stop_at = config
+        .duration_ms
+        .map(|milliseconds| started + std::time::Duration::from_millis(milliseconds));
     let mut workers = Vec::new();
     for _ in 0..config.jobs.min(config.iterations) {
         let protocol = Arc::clone(&protocol);
@@ -98,6 +111,11 @@ pub fn benchmark(
         let iterations = config.iterations;
         workers.push(std::thread::spawn(move || -> Result<(), String> {
             loop {
+                if next.load(Ordering::Relaxed) > 0
+                    && stop_at.is_some_and(|deadline| Instant::now() >= deadline)
+                {
+                    break;
+                }
                 let index = next.fetch_add(1, Ordering::Relaxed);
                 if index >= iterations {
                     break;
@@ -151,6 +169,7 @@ pub fn benchmark(
             warmup: config.warmup,
             jobs: config.jobs,
             deadline_us: config.deadline_us,
+            duration_ms: config.duration_ms,
         },
         metrics: PerformanceMetrics {
             successful_runs,
@@ -205,6 +224,10 @@ pub fn compare_baseline(report: &mut PerformanceReport, baseline: &PerformanceRe
             (current - old) / old * 100.0
         }
     };
+    let latency_p_value = welch_p_value(
+        &report.metrics.latency_us.values,
+        &baseline.metrics.latency_us.values,
+    );
     report.baseline = Some(BaselineComparison {
         p95_change_percent: percent(
             report.metrics.latency_us.p95 as f64,
@@ -214,50 +237,64 @@ pub fn compare_baseline(report: &mut PerformanceReport, baseline: &PerformanceRe
             report.metrics.throughput_runs_per_second,
             baseline.metrics.throughput_runs_per_second,
         ),
+        latency_p_value,
+        statistically_significant: latency_p_value.is_some_and(|value| value < 0.05),
     });
 }
 
-pub fn gate(
-    report: &PerformanceReport,
-    min_success_rate: f64,
-    min_throughput: Option<f64>,
-    max_p95_us: Option<u64>,
-    max_jitter_us: Option<u64>,
-    max_deadline_misses: usize,
-    max_regression_percent: Option<f64>,
-) -> Result<(), Vec<String>> {
+#[derive(Debug, Clone, Default)]
+pub struct PerformanceGates {
+    pub min_success_rate: f64,
+    pub min_throughput: Option<f64>,
+    pub max_p95_us: Option<u64>,
+    pub max_jitter_us: Option<u64>,
+    pub max_deadline_misses: usize,
+    pub max_regression_percent: Option<f64>,
+    pub max_p_value: Option<f64>,
+}
+
+pub fn gate(report: &PerformanceReport, gates: &PerformanceGates) -> Result<(), Vec<String>> {
     let mut failures = Vec::new();
-    if report.metrics.success_rate < min_success_rate {
+    if report.metrics.success_rate < gates.min_success_rate {
         failures.push(format!(
             "success_rate {:.4} < {:.4}",
-            report.metrics.success_rate, min_success_rate
+            report.metrics.success_rate, gates.min_success_rate
         ));
     }
-    if min_throughput.is_some_and(|minimum| report.metrics.throughput_runs_per_second < minimum) {
+    if gates
+        .min_throughput
+        .is_some_and(|minimum| report.metrics.throughput_runs_per_second < minimum)
+    {
         failures.push(format!(
             "throughput {:.2} runs/s below minimum",
             report.metrics.throughput_runs_per_second
         ));
     }
-    if max_p95_us.is_some_and(|maximum| report.metrics.latency_us.p95 > maximum) {
+    if gates
+        .max_p95_us
+        .is_some_and(|maximum| report.metrics.latency_us.p95 > maximum)
+    {
         failures.push(format!(
             "p95 {}us exceeds maximum",
             report.metrics.latency_us.p95
         ));
     }
-    if max_jitter_us.is_some_and(|maximum| report.metrics.latency_us.jitter_p99_p50 > maximum) {
+    if gates
+        .max_jitter_us
+        .is_some_and(|maximum| report.metrics.latency_us.jitter_p99_p50 > maximum)
+    {
         failures.push(format!(
             "jitter {}us exceeds maximum",
             report.metrics.latency_us.jitter_p99_p50
         ));
     }
-    if report.metrics.deadline_misses > max_deadline_misses {
+    if report.metrics.deadline_misses > gates.max_deadline_misses {
         failures.push(format!(
-            "deadline misses {} exceed maximum {max_deadline_misses}",
-            report.metrics.deadline_misses
+            "deadline misses {} exceed maximum {}",
+            report.metrics.deadline_misses, gates.max_deadline_misses
         ));
     }
-    if let (Some(maximum), Some(baseline)) = (max_regression_percent, &report.baseline) {
+    if let (Some(maximum), Some(baseline)) = (gates.max_regression_percent, &report.baseline) {
         if baseline.p95_change_percent > maximum {
             failures.push(format!(
                 "p95 regression {:.2}% exceeds maximum {maximum:.2}%",
@@ -269,6 +306,17 @@ pub fn gate(
                 "throughput regression {:.2}% exceeds maximum {maximum:.2}%",
                 -baseline.throughput_change_percent
             ));
+        }
+    }
+    if let (Some(maximum), Some(baseline)) = (gates.max_p_value, &report.baseline) {
+        match baseline.latency_p_value {
+            Some(value) if value <= maximum => {}
+            Some(value) => failures.push(format!(
+                "latency p-value {value:.6} exceeds maximum {maximum:.6}"
+            )),
+            None => failures.push(
+                "latency significance requires at least two raw samples in both reports".into(),
+            ),
         }
     }
     if failures.is_empty() {
@@ -302,6 +350,51 @@ fn distribution(samples: &[u64]) -> LatencyDistribution {
         p99,
         max: *sorted.last().unwrap(),
         jitter_p99_p50: p99.saturating_sub(p50),
+        values: sorted,
+    }
+}
+
+fn welch_p_value(current: &[u64], baseline: &[u64]) -> Option<f64> {
+    if current.len() < 2 || baseline.len() < 2 {
+        return None;
+    }
+    let stats = |values: &[u64]| {
+        let mean = values.iter().map(|value| *value as f64).sum::<f64>() / values.len() as f64;
+        let variance = values
+            .iter()
+            .map(|value| (*value as f64 - mean).powi(2))
+            .sum::<f64>()
+            / (values.len() - 1) as f64;
+        (mean, variance)
+    };
+    let (current_mean, current_variance) = stats(current);
+    let (baseline_mean, baseline_variance) = stats(baseline);
+    let error = (current_variance / current.len() as f64
+        + baseline_variance / baseline.len() as f64)
+        .sqrt();
+    if error == 0.0 {
+        return Some(if current_mean == baseline_mean {
+            1.0
+        } else {
+            0.0
+        });
+    }
+    let z = ((current_mean - baseline_mean) / error).abs();
+    Some((2.0 * (1.0 - normal_cdf(z))).clamp(0.0, 1.0))
+}
+
+fn normal_cdf(value: f64) -> f64 {
+    let t = 1.0 / (1.0 + 0.231_641_9 * value.abs());
+    let density = (-value * value / 2.0).exp() / (2.0 * std::f64::consts::PI).sqrt();
+    let tail = density
+        * t
+        * (0.319_381_530
+            + t * (-0.356_563_782
+                + t * (1.781_477_937 + t * (-1.821_255_978 + t * 1.330_274_429))));
+    if value >= 0.0 {
+        1.0 - tail
+    } else {
+        tail
     }
 }
 
@@ -323,6 +416,7 @@ mod tests {
                 warmup: 0,
                 jobs: 1,
                 deadline_us: None,
+                duration_ms: None,
             },
             metrics: PerformanceMetrics {
                 successful_runs: 1,
@@ -340,6 +434,27 @@ mod tests {
         baseline.metrics.latency_us = distribution(&[100]);
         baseline.metrics.throughput_runs_per_second = 100.0;
         compare_baseline(&mut report, &baseline);
-        assert!(gate(&report, 1.0, None, None, None, 0, Some(10.0)).is_err());
+        assert!(gate(
+            &report,
+            &PerformanceGates {
+                min_success_rate: 1.0,
+                max_regression_percent: Some(10.0),
+                ..PerformanceGates::default()
+            }
+        )
+        .is_err());
+        report.metrics.latency_us = distribution(&[120, 121, 122, 123, 124]);
+        baseline.metrics.latency_us = distribution(&[100, 101, 102, 103, 104]);
+        compare_baseline(&mut report, &baseline);
+        assert!(report.baseline.as_ref().unwrap().statistically_significant);
+        assert!(gate(
+            &report,
+            &PerformanceGates {
+                min_success_rate: 1.0,
+                max_p_value: Some(0.05),
+                ..PerformanceGates::default()
+            }
+        )
+        .is_ok());
     }
 }

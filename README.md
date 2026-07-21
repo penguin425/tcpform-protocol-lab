@@ -57,6 +57,10 @@ tcpform validate protocol.tcpf
 tcpform test protocol.tcpf
 ```
 
+For a custom skeleton, `tcpform new my-protocol` prompts for transport,
+framing, role names, smoke tests, and GitHub Actions. CI and scripts can pass
+the same choices with flags plus `--non-interactive`.
+
 The generated project includes a versioned DSL file, smoke case, formatter
 configuration, README, and GitHub Actions workflow. On pull requests, CI posts
 or updates one differential report covering success rate, P95 latency, packet
@@ -79,6 +83,7 @@ them with `tcpform ci-report base.json current.json --markdown report.md`.
 ```text
 tcpform validate <file>                # parse + validate every protocol
 tcpform init demo --template websocket # scaffold a protocol project and CI
+tcpform new demo                       # interactive custom protocol wizard
 tcpform template list                  # list built-in protocol templates
 tcpform template search mqtt           # search the configured external registry
 tcpform template add owner/mqtt        # verify, cache, and lock an external template
@@ -93,11 +98,14 @@ tcpform snapshot --update protocol.tcpf # accept current behavior as baseline
 tcpform ci-snapshot --output result.json <file> [protocol]
 tcpform ci-report base.json result.json --markdown report.md
 tcpform doctor [--json] [project-directory] # diagnose host and project setup
+tcpform debug protocol.tcpf demo --break receive --watch step
 tcpform completion bash               # generate Bash completion
 tcpform completion zsh                # generate Zsh completion
 tcpform import-pcap capture.pcapng --protocol captured --output captured.tcpf \
   --analysis captured.inference.json
 tcpform import-kaitai telemetry.ksy --output telemetry.tcpf
+tcpform platform dsl-compat old.tcpf new.tcpf demo
+tcpform platform property-cases properties.json demo --count 100 --seed 7
 tcpform packetdrill export protocol.tcpf demo --local-role client --output demo.pkt
 tcpform packetdrill import demo.pkt --protocol demo --local-role client \
   --peer-role server --output demo.tcpf
@@ -201,6 +209,8 @@ warmup runs, then executes a bounded number of measured iterations across a
 bounded worker count. Its versioned JSON report includes success rate and
 failures, throughput, run-latency min/mean/p50/p95/p99/max, p99–p50 jitter,
 scheduler overhead, deadline misses, and per-step/per-role timeline intervals.
+For local endurance runs, `--duration-ms` uses time as the stopping condition
+while retaining a 100,000-run safety ceiling (overridable with `--iterations`).
 
 All requested gates are evaluated after the report is written, so failed CI
 runs retain evidence. A prior report can be compared for both p95 latency and
@@ -208,8 +218,12 @@ throughput regression:
 
 ```sh
 tcpform perf protocol.tcpf demo --iterations 100 --output current.json \
-  --baseline baseline.json --max-regression-percent 10
+  --baseline baseline.json --max-regression-percent 10 --max-p-value 0.05
 ```
+
+Reports retain the bounded raw latency samples. Baseline comparison computes a
+two-sided significance value so a percentage regression can be distinguished
+from ordinary run-to-run noise.
 
 Wall-clock benchmarks are sensitive to host load. Use dedicated runners,
 enough warmups and iterations, and realistic tolerances for release gates;
@@ -256,7 +270,10 @@ uses repeated same-direction payloads to propose fixed and variable field
 boundaries as `header_schema` blocks. It also generates endpoint/header
 comments, timing delays, payload hex, send/receive steps, and a smoke case.
 `--analysis` writes the session states, inferred fields, confidence scores, and
-sample values as JSON for review or downstream tooling. Treat all inferred DSL
+sample values as JSON for review or downstream tooling. The dashboard review
+screen allows session selection and editing of directions and role names,
+shows inferred boundaries and request/response pairs, and can apply the result
+to the integrated editor. Treat all inferred DSL
 and field boundaries as hypotheses: captures may be incomplete and may contain
 credentials or other sensitive payloads.
 
@@ -902,6 +919,20 @@ in both the alignment view and packet inspector. Captures can also generate a
 reviewable DSL template: Ethernet/IPv4/TCP/UDP packets become dependent
 `send_raw`/`recv_raw` pairs, while unknown link formats retain exact hex in
 ordinary send/receive pairs.
+Inferred field boundaries are editable by name, direction, offset, length and
+kind; Rust validates the regenerated DSL before it can be applied.
+
+Team runs are persisted in SQLite and can be filtered by protocol, branch,
+commit, environment, status, and time. The dashboard shows success trends,
+P95 duration, flaky tests, and two-run comparisons. JUnit XML, SARIF, and OTLP
+JSON results can be imported through the dashboard or `POST /api/v1/runs/import`.
+The same panel previews database size and expired records per table and requires
+an explicit confirmation before retention pruning.
+
+**Run in browser WASM** executes the portable action subset directly in the
+browser without contacting the run API. Unsupported or incomplete steps are
+reported as failures rather than silently delegated to the server. The
+committed engine is rebuilt and byte-compared in CI with `scripts/build-wasm.sh`.
 
 The packet lab links hex, ASCII, individual bits, standard header fields, and
 custom `header_schema` fields. Editable MAC, IPv4, TCP, and UDP values update

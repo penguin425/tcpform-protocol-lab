@@ -1,5 +1,6 @@
 /target/
 /fuzz/target/
+/wasm-engine/target/
 node_modules/
 /test-results/
 /playwright-report/

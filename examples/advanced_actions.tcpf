@@ -1,5 +1,6 @@
 protocol "advanced_actions" {
   description = "Corruption, retry, loop and extended field matching"
+  clock       = "virtual"
 
   step "corrupt_three" {
     role   = "sender"

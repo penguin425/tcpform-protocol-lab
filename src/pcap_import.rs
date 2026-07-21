@@ -1,6 +1,6 @@
 //! PCAP/PCAPNG decoding and starter DSL generation.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -50,7 +50,7 @@ pub struct SessionInference {
     pub states: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FieldInference {
     pub session: String,
     pub direction: String,
@@ -60,6 +60,34 @@ pub struct FieldInference {
     pub kind: String,
     pub confidence: f64,
     pub examples_hex: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct CaptureReview {
+    pub schema_version: &'static str,
+    pub protocol: String,
+    pub sessions: Vec<SessionInference>,
+    pub packets: Vec<ReviewPacket>,
+    pub fields: Vec<FieldInference>,
+    pub warnings: Vec<String>,
+    pub generated_dsl: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ReviewPacket {
+    pub index: usize,
+    pub session: String,
+    pub timestamp_ns: u64,
+    pub source: String,
+    pub destination: String,
+    pub transport: String,
+    pub direction: String,
+    pub sender_role: String,
+    pub receiver_role: String,
+    pub flags: Vec<String>,
+    pub payload_hex: String,
+    pub payload_length: usize,
+    pub paired_with: Option<usize>,
 }
 
 pub fn import_capture(bytes: &[u8], protocol: &str) -> Result<String, String> {
@@ -77,6 +105,65 @@ pub fn analyze_capture(bytes: &[u8]) -> Result<CaptureInference, String> {
         return Err("capture contains no supported IPv4/IPv6 TCP or UDP packets".into());
     }
     Ok(analyze_packets(&packets))
+}
+
+pub fn review_capture(bytes: &[u8], protocol: &str) -> Result<CaptureReview, String> {
+    validate_name(protocol)?;
+    let packets = decode_capture(bytes)?;
+    if packets.is_empty() {
+        return Err("capture contains no supported IPv4/IPv6 TCP or UDP packets".into());
+    }
+    let inference = analyze_packets(&packets);
+    let mut review = Vec::with_capacity(packets.len());
+    for (index, packet) in packets.iter().enumerate() {
+        let source = format!("{}:{}", packet.source, packet.source_port);
+        let destination = format!("{}:{}", packet.destination, packet.destination_port);
+        let session = inference.sessions.iter().find(|candidate| {
+            (candidate.client == source && candidate.server == destination)
+                || (candidate.client == destination && candidate.server == source)
+        });
+        let from_client = session.is_none_or(|candidate| candidate.client == source);
+        review.push(ReviewPacket {
+            index: index + 1,
+            session: session
+                .map(|value| value.id.clone())
+                .unwrap_or_else(|| "session-1".into()),
+            timestamp_ns: packet.timestamp_ns,
+            source,
+            destination,
+            transport: packet.transport.clone(),
+            direction: if from_client { "request" } else { "response" }.into(),
+            sender_role: if from_client { "client" } else { "server" }.into(),
+            receiver_role: if from_client { "server" } else { "client" }.into(),
+            flags: packet.flags.clone(),
+            payload_hex: crate::bytes_to_hex(&packet.payload),
+            payload_length: packet.payload.len(),
+            paired_with: None,
+        });
+    }
+    for index in 0..review.len() {
+        if review[index].payload_length == 0 || review[index].paired_with.is_some() {
+            continue;
+        }
+        if let Some(peer) = (index + 1..review.len()).find(|peer| {
+            review[*peer].session == review[index].session
+                && review[*peer].payload_length > 0
+                && review[*peer].direction != review[index].direction
+                && review[*peer].paired_with.is_none()
+        }) {
+            review[index].paired_with = Some(peer + 1);
+            review[peer].paired_with = Some(index + 1);
+        }
+    }
+    Ok(CaptureReview {
+        schema_version: "1.0",
+        protocol: protocol.into(),
+        sessions: inference.sessions,
+        packets: review,
+        fields: inference.fields,
+        warnings: inference.warnings,
+        generated_dsl: render_dsl(&packets, protocol),
+    })
 }
 
 pub fn decode_capture(bytes: &[u8]) -> Result<Vec<CapturedPacket>, String> {
@@ -320,7 +407,9 @@ fn render_dsl(packets: &[CapturedPacket], protocol: &str) -> String {
     let sessions = build_sessions(packets);
     let inference = analyze_packets_with_sessions(packets, &sessions);
     let mut out = format!("tcpform {{ dsl_version = 2 }}\n\n# Generated from a packet capture. Review roles, secrets, and assertions before use.\nprotocol \"{protocol}\" {{\n  description = \"Imported {} packet(s) across {} session(s)\"\n  clock = \"virtual\"\n", packets.len(), sessions.len());
+    out.push_str("\n  # tcpform-review-fields:start\n");
     render_inferred_schemas(&mut out, &inference.fields);
+    out.push_str("  # tcpform-review-fields:end\n");
     let mut previous = None::<String>;
     let mut last_timestamp = packets[0].timestamp_ns;
     let mut role_states = HashMap::<String, String>::new();
@@ -408,6 +497,28 @@ fn render_dsl(packets: &[CapturedPacket], protocol: &str) -> String {
     }
     out.push_str(&format!("}}\n\ncases \"{protocol}\" {{\n  case \"capture_smoke\" {{ expect = \"pass\" tags = [\"smoke\", \"pcap-import\"] }}\n}}\n"));
     out
+}
+
+pub fn apply_review_fields(dsl: &str, fields: &[FieldInference]) -> Result<String, String> {
+    let start_marker = "  # tcpform-review-fields:start\n";
+    let end_marker = "  # tcpform-review-fields:end\n";
+    let start = dsl
+        .find(start_marker)
+        .ok_or("generated DSL has no review field marker")?;
+    let content_start = start + start_marker.len();
+    let end = dsl[content_start..]
+        .find(end_marker)
+        .map(|offset| content_start + offset)
+        .ok_or("generated DSL has an unterminated review field marker")?;
+    let mut schemas = String::new();
+    render_inferred_schemas(&mut schemas, fields);
+    let mut output = String::with_capacity(dsl.len() + schemas.len());
+    output.push_str(&dsl[..content_start]);
+    output.push_str(&schemas);
+    output.push_str(&dsl[end..]);
+    let blocks = crate::parse_file(&output).map_err(|error| error.to_string())?;
+    crate::model::interpret(&blocks).map_err(|error| error.to_string())?;
+    Ok(output)
 }
 
 fn build_sessions(packets: &[CapturedPacket]) -> HashMap<String, Session> {
@@ -847,6 +958,29 @@ mod tests {
         assert_eq!(packets[0].destination_port, 53);
         assert_eq!(packets[0].payload, b"dns");
         assert_eq!(packets[0].timestamp_ns, 123_000);
+    }
+
+    #[test]
+    fn review_model_exposes_editable_packet_metadata_and_dsl() {
+        let mut review = review_capture(&ipv4_udp_capture(), "dns_review").unwrap();
+        assert_eq!(review.schema_version, "1.0");
+        assert_eq!(review.sessions.len(), 1);
+        assert_eq!(review.packets[0].direction, "request");
+        assert_eq!(review.packets[0].sender_role, "client");
+        assert_eq!(review.packets[0].payload_hex, "646e73");
+        assert!(review.generated_dsl.contains("protocol \"dns_review\""));
+        review.fields = vec![FieldInference {
+            session: review.sessions[0].id.clone(),
+            direction: "request".into(),
+            name: "dns_header".into(),
+            offset: 0,
+            length: 2,
+            kind: "hex".into(),
+            confidence: 1.0,
+            examples_hex: vec!["646e".into()],
+        }];
+        let edited = apply_review_fields(&review.generated_dsl, &review.fields).unwrap();
+        assert!(edited.contains("dns_header = { offset = 0 length = 2"));
     }
 
     #[test]

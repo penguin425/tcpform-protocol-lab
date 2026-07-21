@@ -11,14 +11,14 @@ pub fn generate(shell: &str) -> Result<&'static str, String> {
 }
 
 #[cfg(test)]
-const COMMANDS: &str = "validate list plan visualize serve fmt migrate init template schema spec snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore model-check observe standards perf generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor completion import-pcap import-kaitai packetdrill help";
+const COMMANDS: &str = "validate list plan visualize serve fmt migrate init new template schema spec snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore model-check observe standards perf generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor debug completion import-pcap import-kaitai packetdrill help";
 
 const BASH: &str = r#"_tcpform() {
   local cur prev commands
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
-  commands="validate list plan visualize serve fmt migrate init template schema spec snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore model-check observe standards perf generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor completion import-pcap import-kaitai packetdrill help"
+  commands="validate list plan visualize serve fmt migrate init new template schema spec snapshot ci-snapshot ci-report lsp gate bundle replay-bundle anonymize orchestrate proxy explore model-check observe standards perf generate-faults fuzz fuzz-export plugin tls-audit differential conformance interop platform run test doctor debug completion import-pcap import-kaitai packetdrill help"
   case "$prev" in
     completion) COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") ); return ;;
     standards) COMPREPLY=( $(compgen -W "ttcn3-export ttcn3-import asn1-import" -- "$cur") ); return ;;
@@ -44,7 +44,7 @@ _tcpform() {
   commands=(
     'validate:parse and validate protocols' 'list:list protocols' 'plan:show execution plan'
     'visualize:generate visualizer assets' 'serve:start visualizer server' 'fmt:format DSL files'
-    'migrate:migrate DSL syntax' 'init:create a project' 'template:list or show templates'
+    'migrate:migrate DSL syntax' 'init:create a project from a template' 'new:interactively create a custom project' 'template:list or show templates'
     'schema:print machine-readable schema' 'spec:import and track specification requirements' 'snapshot:create or check a local snapshot' 'ci-snapshot:create CI snapshot' 'ci-report:compare CI snapshots'
     'lsp:start language server' 'gate:evaluate metrics' 'bundle:create reproduction bundle'
     'replay-bundle:replay a bundle' 'anonymize:anonymize a report' 'orchestrate:run a scenario'
@@ -59,7 +59,7 @@ _tcpform() {
     'conformance:test an implementation for protocol conformance'
     'interop:test interoperability across multiple implementations'
     'platform:platform integrations' 'run:run a protocol' 'test:run case suites'
-    'doctor:diagnose project and host' 'completion:generate shell completion' 'help:show help'
+    'doctor:diagnose project and host' 'debug:step through a protocol trace' 'completion:generate shell completion' 'help:show help'
     'import-pcap:generate starter DSL from PCAP or PCAPNG'
     'import-kaitai:import a Kaitai Struct ksy schema'
     'packetdrill:import or export packetdrill packet scripts'
@@ -76,8 +76,11 @@ _tcpform() {
     template) _values 'template command' list show search add ;;
     fuzz-export) _values 'fuzzer' boofuzz aflnet ;;
     packetdrill) _values 'conversion direction' import export ;;
+    platform) _values 'platform integration' openapi-import protobuf-import proto-export wireshark scapy schema-check dsl-compat property-cases k8s-job html-report sarif netem ;;
     init) _arguments '1:directory:_files -/' '--name[project name]:name' '--template[protocol template]:template:($templates)' '--force[overwrite generated files]' ;;
+    new) _arguments '1:directory:_files -/' '--name[project name]:name' '--transport[transport]:transport:(tcp udp)' '--framing[framing]:framing:(raw line length-prefixed)' '--client-role[client role]:role' '--server-role[server role]:role' '--no-tests[omit smoke tests]' '--no-github-actions[omit workflow]' '--non-interactive[use defaults without prompts]' '--force[overwrite generated files]' ;;
     doctor) _arguments '1:project directory:_files -/' '--json[emit JSON report]' ;;
+    debug) _arguments '1:source:_files' '2:protocol' '*--break[stop at step]:step' '*--watch[watch event field]:field' '--commands[read commands from file]:file:_files' ;;
     *) _arguments '*:file:_files' '--json[emit JSON]' '--output[output path]:path:_files' '--help[show help]' ;;
   esac
 }

@@ -10,7 +10,7 @@
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -37,12 +37,14 @@ fn main() {
         "fmt" => cmd_fmt(&args[2..]),
         "migrate" => cmd_migrate(&args[2..]),
         "init" => cmd_init(&args[2..]),
+        "new" => cmd_new(&args[2..]),
         "template" => cmd_template(&args[2..]),
         "schema" => cmd_schema(&args[2..]),
         "snapshot" => cmd_snapshot(&args[2..]),
         "ci-snapshot" => cmd_ci_snapshot(&args[2..]),
         "ci-report" => cmd_ci_report(&args[2..]),
         "doctor" => cmd_doctor(&args[2..]),
+        "debug" => cmd_debug(&args[2..]),
         "completion" => cmd_completion(&args[2..]),
         "spec" => cmd_spec(&args[2..]),
         "import-pcap" => cmd_import_pcap(&args[2..]),
@@ -100,6 +102,7 @@ fn usage() {
          tcpform fmt [--check|--write] [--stdin] [--config <file>] [--indent <n>] [--align] [--expand-inline] <file...>\n  \
          tcpform migrate [--check|--write] <file>\n  \
          tcpform init [directory] [--name <name>] [--template <name>] [--force]\n  \
+         tcpform new [directory] [--name <name>] [--transport <tcp|udp>] [--framing <raw|line|length-prefixed>] [--client-role <name>] [--server-role <name>] [--no-tests] [--no-github-actions] [--non-interactive] [--force]\n  \
          tcpform template <list|show <name>|search <query>|add <owner/name>> [--registry <file>]\n  \
          tcpform schema dsl [--output <file>]\n  \
          tcpform schema decode <source> <protocol> <schema> --hex <bytes>\n  \
@@ -108,6 +111,7 @@ fn usage() {
          tcpform ci-snapshot --output <file> <source> [protocol]\n  \
          tcpform ci-report <baseline.json> <current.json> [--markdown <file>] [--json <file>] [--fail-on-regression]\n  \
          tcpform doctor [--json] [project-directory]\n  \
+         tcpform debug <source> <protocol> [--break <step>] [--watch <field>] [--commands <file>]\n  \
          tcpform completion <bash|zsh>\n  \
          tcpform spec import <spec.txt> --protocol <name> --output <file.tcpf> --requirements <requirements.json> [--source <reference>]\n  \
          tcpform spec coverage <requirements.json> <trace.json> [--output <coverage.json>]\n  \
@@ -126,7 +130,7 @@ fn usage() {
          tcpform model-check <source> <protocol> [--max-states <n>] [--output <report.json>] [--fail-on-violation]\n  \
          tcpform observe <trace.json> --output <otlp.json> --start-unix-ns <n> [--ebpf <events.jsonl>] [--service-name <name>] [--correlation-window-ns <n>]\n  \
          tcpform standards <ttcn3-export|ttcn3-import|asn1-import> ...\n  \
-         tcpform perf <source> <protocol> --output <report.json> [--iterations <n>] [--warmup <n>] [--jobs <n>] [performance gates]\n  \
+         tcpform perf <source> <protocol> --output <report.json> [--iterations <n>|--duration-ms <n>] [--warmup <n>] [--jobs <n>] [--baseline <report>] [--max-p-value <0..1>] [performance gates]\n  \
          tcpform generate-faults --output <directory> <source>\n  \
          tcpform fuzz <source> <protocol> --role <role> --connect <address> --output <directory> [--iterations <n>] [--seed <n>] [--framing <kind>] [--coverage-file <path>] [--max-input-bytes <n>] [--stop-on-crash]\n  \
          tcpform fuzz-export <boofuzz|aflnet> <source> <protocol> --role <role> --output <path> [--host <host> --port <port>]\n  \
@@ -135,7 +139,7 @@ fn usage() {
          tcpform differential --left <address> --right <address> --role <role> [--framing <kind>] <file> <protocol>\n  \
          tcpform conformance --connect <address> --role <role> [--udp|--tls|--unix|--websocket|--quic] [--listen] [--framing <kind>] [--json <file>] [--markdown <file>] [--junit <file>] <file> <protocol>\n  \
          tcpform interop --targets <implementations.json> --role <role> [--framing <kind>] [--json <file>] [--markdown <file>] [--junit <file>] <file> <protocol>\n  \
-         tcpform platform <openapi-import|protobuf-import|proto-export|wireshark|scapy|schema-check|k8s-job|html-report|sarif|netem> ...\n  \
+         tcpform platform <openapi-import|protobuf-import|proto-export|wireshark|scapy|schema-check|dsl-compat|property-cases|k8s-job|html-report|sarif|netem> ...\n  \
          tcpform run [--json] [--json-file <file>] [--diagram] [--pcap <file>] [--pcapng <file>] [--allow-plugins] <file> <protocol>\n  \
          tcpform run --live [--udp] --bind <address> <file> <protocol>\n  \
          tcpform run --external --role <role> [--udp|--tls|--unix|--websocket|--quic] [--listen] [--framing <kind>] [--alpn <protocol>] [--require-client-cert] --connect <address> <file> <protocol>\n  \
@@ -278,6 +282,65 @@ fn cmd_platform(args: &[String]) -> Result<(), String> {
                 .map_err(|errors| errors.join("; "))?;
             println!("compatible");
             Ok(())
+        }
+        "dsl-compat" => {
+            let old = args
+                .get(1)
+                .ok_or("dsl-compat <old.tcpf> <new.tcpf> [protocol]")?;
+            let new = args
+                .get(2)
+                .ok_or("dsl-compat <old.tcpf> <new.tcpf> [protocol]")?;
+            let old_protocols = load(old)?;
+            let new_protocols = load(new)?;
+            let name = args
+                .get(3)
+                .map(String::as_str)
+                .or_else(|| old_protocols.first().map(|value| value.name.as_str()))
+                .ok_or("old source contains no protocol")?;
+            let report = tcpform::platform::protocol_compatibility(
+                find(&old_protocols, name)?,
+                find(&new_protocols, name)?,
+            );
+            println!("{}", serde_json::to_string_pretty(&report).unwrap());
+            if report["compatible"] == false {
+                Err("breaking DSL changes detected".into())
+            } else {
+                Ok(())
+            }
+        }
+        "property-cases" => {
+            let schema = args.get(1).ok_or("property-cases <schema.json> <protocol> [--count <n>] [--seed <n>] [--output <file>]")?;
+            let protocol = args.get(2).ok_or("property-cases requires a protocol")?;
+            let value_after = |flag: &str| -> Result<Option<&str>, String> {
+                args.iter()
+                    .position(|value| value == flag)
+                    .map(|index| {
+                        args.get(index + 1)
+                            .map(String::as_str)
+                            .ok_or_else(|| format!("{flag} requires a value"))
+                    })
+                    .transpose()
+            };
+            let count = value_after("--count")?
+                .unwrap_or("100")
+                .parse()
+                .map_err(|_| "--count must be an integer")?;
+            let seed = value_after("--seed")?
+                .unwrap_or("1")
+                .parse()
+                .map_err(|_| "--seed must be an integer")?;
+            let schema: serde_json::Value = serde_json::from_str(
+                &fs::read_to_string(schema).map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            let rendered =
+                tcpform::platform::property_cases_to_dsl(protocol, &schema, count, seed)?;
+            if let Some(path) = value_after("--output")? {
+                fs::write(path, rendered).map_err(|error| error.to_string())
+            } else {
+                print!("{rendered}");
+                Ok(())
+            }
         }
         "k8s-job" => {
             if args.len() < 6 {
@@ -1040,6 +1103,131 @@ fn cmd_init(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn cmd_new(args: &[String]) -> Result<(), String> {
+    let mut directory: Option<String> = None;
+    let mut options = tcpform::templates::NewProjectOptions::default();
+    let mut name_set = false;
+    let mut transport_set = false;
+    let mut framing_set = false;
+    let mut client_set = false;
+    let mut server_set = false;
+    let mut interactive = std::io::stdin().is_terminal();
+    let mut force = false;
+    let mut index = 0;
+    while index < args.len() {
+        let value = args[index].as_str();
+        let next = |index: &mut usize| -> Result<&str, String> {
+            *index += 1;
+            args.get(*index)
+                .map(String::as_str)
+                .ok_or_else(|| format!("{value} requires a value"))
+        };
+        match value {
+            "--name" => {
+                options.project_name = next(&mut index)?.into();
+                name_set = true;
+            }
+            "--transport" => {
+                options.transport = next(&mut index)?.into();
+                transport_set = true;
+            }
+            "--framing" => {
+                options.framing = next(&mut index)?.into();
+                framing_set = true;
+            }
+            "--client-role" => {
+                options.client_role = next(&mut index)?.into();
+                client_set = true;
+            }
+            "--server-role" => {
+                options.server_role = next(&mut index)?.into();
+                server_set = true;
+            }
+            "--no-tests" => options.include_tests = false,
+            "--no-github-actions" => options.include_github_actions = false,
+            "--non-interactive" => interactive = false,
+            "--force" => force = true,
+            value if !value.starts_with('-') && directory.is_none() => {
+                directory = Some(value.into())
+            }
+            value => return Err(format!("unknown new argument `{value}`")),
+        }
+        index += 1;
+    }
+    if interactive {
+        if !name_set {
+            options.project_name = prompt("Project name", &options.project_name)?;
+        }
+        if !transport_set {
+            options.transport = prompt("Transport (tcp/udp)", &options.transport)?;
+        }
+        if !framing_set {
+            options.framing = prompt("Framing (raw/line/length-prefixed)", &options.framing)?;
+        }
+        if !client_set {
+            options.client_role = prompt("Client role", &options.client_role)?;
+        }
+        if !server_set {
+            options.server_role = prompt("Server role", &options.server_role)?;
+        }
+        options.include_tests = prompt_yes_no("Create smoke test", options.include_tests)?;
+        options.include_github_actions = prompt_yes_no(
+            "Create GitHub Actions workflow",
+            options.include_github_actions,
+        )?;
+    } else if !name_set {
+        if let Some(path) = directory.as_deref() {
+            options.project_name = std::path::Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("tcpform-project")
+                .into();
+        }
+    }
+    let directory = directory.unwrap_or_else(|| options.project_name.clone());
+    for path in tcpform::templates::new_project(std::path::Path::new(&directory), &options, force)?
+    {
+        println!("created {}", path.display());
+    }
+    println!("\nNext: cd {directory} && tcpform validate protocol.tcpf");
+    Ok(())
+}
+
+fn prompt(label: &str, default: &str) -> Result<String, String> {
+    print!("{label} [{default}]: ");
+    std::io::stdout()
+        .flush()
+        .map_err(|error| error.to_string())?;
+    let mut input = String::new();
+    std::io::stdin()
+        .read_line(&mut input)
+        .map_err(|error| error.to_string())?;
+    let value = input.trim();
+    Ok(if value.is_empty() {
+        default.into()
+    } else {
+        value.into()
+    })
+}
+
+fn prompt_yes_no(label: &str, default: bool) -> Result<bool, String> {
+    let hint = if default { "Y/n" } else { "y/N" };
+    print!("{label} [{hint}]: ");
+    std::io::stdout()
+        .flush()
+        .map_err(|error| error.to_string())?;
+    let mut input = String::new();
+    std::io::stdin()
+        .read_line(&mut input)
+        .map_err(|error| error.to_string())?;
+    match input.trim().to_ascii_lowercase().as_str() {
+        "" => Ok(default),
+        "y" | "yes" => Ok(true),
+        "n" | "no" => Ok(false),
+        _ => Err(format!("{label} expects yes or no")),
+    }
+}
+
 fn cmd_template(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("list") => {
@@ -1368,6 +1556,104 @@ fn cmd_doctor(args: &[String]) -> Result<(), String> {
     } else {
         Err("doctor found one or more fatal problems".into())
     }
+}
+
+fn cmd_debug(args: &[String]) -> Result<(), String> {
+    let source = args.first().ok_or("debug requires <source> <protocol>")?;
+    let name = args.get(1).ok_or("debug requires <source> <protocol>")?;
+    let mut breakpoints = Vec::new();
+    let mut watches = Vec::new();
+    let mut commands = None;
+    let mut index = 2;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--break" => {
+                index += 1;
+                breakpoints.push(args.get(index).ok_or("--break requires a step")?.clone());
+            }
+            "--watch" => {
+                index += 1;
+                watches.push(args.get(index).ok_or("--watch requires a field")?.clone());
+            }
+            "--commands" => {
+                index += 1;
+                commands = Some(args.get(index).ok_or("--commands requires a file")?.clone());
+            }
+            value => return Err(format!("unknown debug argument `{value}`")),
+        }
+        index += 1;
+    }
+    let protocols = load(source)?;
+    let trace = match Engine::new(find(&protocols, name)?.clone())
+        .map_err(|error| error.to_string())?
+        .run()
+    {
+        Ok(trace) => trace,
+        Err(EngineError::Runtime { trace, .. }) => trace,
+        Err(error) => return Err(error.to_string()),
+    };
+    let mut debugger = tcpform::platform::Debugger::new(trace);
+    for step in breakpoints {
+        debugger.add_breakpoint(tcpform::platform::Breakpoint {
+            step: Some(step),
+            role: None,
+            only_failures: false,
+        });
+    }
+    for watch in watches {
+        debugger.watch(watch);
+    }
+    let scripted = commands
+        .map(|path| fs::read_to_string(path).map_err(|error| error.to_string()))
+        .transpose()?;
+    if scripted.is_none() && !std::io::stdin().is_terminal() {
+        while let Some(value) = debugger.step() {
+            println!("{}", serde_json::to_string(&value).unwrap());
+        }
+        return Ok(());
+    }
+    let mut script_lines = scripted.as_deref().map(str::lines);
+    loop {
+        let command = if let Some(lines) = script_lines.as_mut() {
+            match lines.next() {
+                Some(value) => value.trim().to_string(),
+                None => break,
+            }
+        } else {
+            print!("(tcpform-debug) ");
+            std::io::stdout()
+                .flush()
+                .map_err(|error| error.to_string())?;
+            let mut line = String::new();
+            if std::io::stdin()
+                .read_line(&mut line)
+                .map_err(|error| error.to_string())?
+                == 0
+            {
+                break;
+            }
+            line.trim().to_string()
+        };
+        let value = match command.as_str() {
+            "s" | "step" | "n" | "next" => debugger.step(),
+            "c" | "continue" | "resume" => debugger.resume(),
+            "b" | "back" | "rewind" => debugger.rewind(),
+            "i" | "inspect" => debugger.inspect_current(),
+            "q" | "quit" | "exit" => break,
+            "" => continue,
+            "help" | "h" => {
+                println!("step|next, continue, back, inspect, quit");
+                continue;
+            }
+            other => return Err(format!("unknown debugger command `{other}`")),
+        };
+        match value {
+            Some(value) => println!("{}", serde_json::to_string_pretty(&value).unwrap()),
+            None if debugger.is_done() => println!("end of trace"),
+            None => println!("no current event"),
+        }
+    }
+    Ok(())
 }
 
 fn cmd_completion(args: &[String]) -> Result<(), String> {
@@ -2085,6 +2371,18 @@ fn serve_request(stream: &mut TcpStream, state: &ServerState) -> Result<(), Stri
             "text/javascript",
             include_bytes!("../dashboard/analysis-tools.js"),
         ),
+        ("GET", "/wasm-engine.js") => http_response(
+            stream,
+            "200 OK",
+            "text/javascript",
+            include_bytes!("../dashboard/wasm-engine.js"),
+        ),
+        ("GET", "/tcpform-engine.wasm") => http_response(
+            stream,
+            "200 OK",
+            "application/wasm",
+            include_bytes!("../dashboard/tcpform-engine.wasm"),
+        ),
         ("GET", "/advanced-tools.js") => http_response(
             stream,
             "200 OK",
@@ -2124,6 +2422,41 @@ fn serve_request(stream: &mut TcpStream, state: &ServerState) -> Result<(), Stri
                 "200 OK",
                 "text/plain; version=0.0.4",
                 tcpform::platform::prometheus_metrics().as_bytes(),
+            )
+        }
+        ("GET", "/api/v1/admin/retention") => {
+            if let Err(error) = state.authorize(&headers, "admin", false) {
+                return api_error(stream, "403 Forbidden", &error);
+            }
+            let days = query_values(&path)
+                .get("days")
+                .map(|value| {
+                    value
+                        .parse::<u64>()
+                        .map_err(|_| "days must be an integer".to_string())
+                })
+                .transpose()?
+                .unwrap_or(30);
+            json_response(stream, "200 OK", &state.store.retention_status(days)?)
+        }
+        ("POST", "/api/v1/admin/retention") => {
+            if let Err(error) = state.authorize(&headers, "admin", true) {
+                return api_error(stream, "403 Forbidden", &error);
+            }
+            let value: serde_json::Value =
+                serde_json::from_slice(body).map_err(|error| format!("invalid JSON: {error}"))?;
+            if value.get("confirm").and_then(|value| value.as_bool()) != Some(true) {
+                return api_error(stream, "400 Bad Request", "confirm=true is required");
+            }
+            let days = value
+                .get("days")
+                .and_then(|value| value.as_u64())
+                .ok_or("days required")?;
+            let removed = state.store.prune(days)?;
+            json_response(
+                stream,
+                "200 OK",
+                &serde_json::json!({"removed":removed,"status":state.store.retention_status(days)?}),
             )
         }
         ("GET", "/api/v1/jobs") => {
@@ -2217,11 +2550,101 @@ fn serve_request(stream: &mut TcpStream, state: &ServerState) -> Result<(), Stri
             if let Err(error) = state.authorize(&headers, "view", false) {
                 return api_error(stream, "401 Unauthorized", &error);
             }
+            let filter = run_filter_from_path(&path)?;
             json_response(
                 stream,
                 "200 OK",
-                &serde_json::json!({"schema_version":"1.0","runs":state.store.list_runs(None, 100)?}),
+                &serde_json::json!({"schema_version":"1.0","runs":state.store.list_runs_filtered(&filter)?}),
             )
+        }
+        ("GET", "/api/v1/runs/summary") => {
+            if let Err(error) = state.authorize(&headers, "view", false) {
+                return api_error(stream, "401 Unauthorized", &error);
+            }
+            let filter = run_filter_from_path(&path)?;
+            json_response(
+                stream,
+                "200 OK",
+                &serde_json::json!({"schema_version":"1.0","summary":state.store.run_summary(&filter)?}),
+            )
+        }
+        ("GET", "/api/v1/runs/compare") => {
+            if let Err(error) = state.authorize(&headers, "view", false) {
+                return api_error(stream, "401 Unauthorized", &error);
+            }
+            let query = query_values(&path);
+            let base = query.get("base").ok_or("base run id required")?;
+            let current = query.get("current").ok_or("current run id required")?;
+            let base_run = state.store.get_run(base)?.ok_or("base run not found")?;
+            let current_run = state
+                .store
+                .get_run(current)?
+                .ok_or("current run not found")?;
+            let comparison = compare_run_documents(&base_run, &current_run);
+            json_response(
+                stream,
+                "200 OK",
+                &serde_json::json!({"schema_version":"1.0","comparison":comparison}),
+            )
+        }
+        ("POST", "/api/v1/runs/import") => {
+            let identity = match state.authorize(&headers, "run", true) {
+                Ok(value) => value,
+                Err(error) => return api_error(stream, "403 Forbidden", &error),
+            };
+            let value: serde_json::Value =
+                serde_json::from_slice(body).map_err(|error| format!("invalid JSON: {error}"))?;
+            let format = value
+                .get("format")
+                .and_then(|value| value.as_str())
+                .ok_or("format required")?;
+            let (default_protocol, status, document, mut metadata) =
+                tcpform::storage::normalize_run_import(
+                    format,
+                    value.get("content").ok_or("content required")?,
+                )?;
+            let protocol = value
+                .get("protocol")
+                .and_then(|value| value.as_str())
+                .unwrap_or(&default_protocol);
+            metadata.branch = value
+                .get("branch")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
+            metadata.commit = value
+                .get("commit")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
+            metadata.environment = value
+                .get("environment")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
+            metadata.duration_us = value.get("duration_us").and_then(|value| value.as_u64());
+            let id = state
+                .store
+                .save_run_with_metadata(protocol, &status, &document, &metadata)?;
+            state
+                .store
+                .audit(&identity.0, "import", &id, "ok", format)?;
+            json_response(
+                stream,
+                "201 Created",
+                &serde_json::json!({"id":id,"status":status}),
+            )
+        }
+        ("GET", route) if route.starts_with("/api/v1/runs/") => {
+            if let Err(error) = state.authorize(&headers, "view", false) {
+                return api_error(stream, "401 Unauthorized", &error);
+            }
+            let id = route.trim_start_matches("/api/v1/runs/");
+            match state.store.get_run(id)? {
+                Some(run) => json_response(
+                    stream,
+                    "200 OK",
+                    &serde_json::json!({"schema_version":"1.0","run":run}),
+                ),
+                None => api_error(stream, "404 Not Found", "run not found"),
+            }
         }
         ("GET", "/api/v1/corpus") => {
             if let Err(error) = state.authorize(&headers, "view", false) {
@@ -2250,6 +2673,21 @@ fn serve_request(stream: &mut TcpStream, state: &ServerState) -> Result<(), Stri
                 &format!("{} jobs", jobs.len()),
             )?;
             json_response(stream, "202 Accepted", &serde_json::json!({"jobs":jobs}))
+        }
+        ("GET", route)
+            if route.starts_with("/api/v1/corpus/") && route.ends_with("/regression") =>
+        {
+            if let Err(error) = state.authorize(&headers, "view", false) {
+                return api_error(stream, "401 Unauthorized", &error);
+            }
+            let fingerprint = route
+                .trim_start_matches("/api/v1/corpus/")
+                .trim_end_matches("/regression")
+                .trim_end_matches('/');
+            match state.store.corpus_regression_bundle(fingerprint)? {
+                Some(bundle) => json_response(stream, "200 OK", &bundle),
+                None => api_error(stream, "404 Not Found", "corpus failure not found"),
+            }
         }
         ("POST", route) if route.starts_with("/api/v1/corpus/") && route.ends_with("/promote") => {
             let identity = match state.authorize(&headers, "run", true) {
@@ -2352,6 +2790,43 @@ fn serve_request(stream: &mut TcpStream, state: &ServerState) -> Result<(), Stri
                 .audit(&identity.0, "create", &id, "ok", "annotation")?;
             json_response(stream, "201 Created", &serde_json::json!({"id":id}))
         }
+        ("POST", "/api/v1/pcap/review") => {
+            if let Err(error) = state.authorize(&headers, "run", true) {
+                return api_error(stream, "403 Forbidden", &error);
+            }
+            let value: serde_json::Value =
+                serde_json::from_slice(body).map_err(|error| format!("invalid JSON: {error}"))?;
+            let protocol = value
+                .get("protocol")
+                .and_then(|value| value.as_str())
+                .unwrap_or("pcap_import");
+            let capture = value
+                .get("capture_hex")
+                .and_then(|value| value.as_str())
+                .ok_or("capture_hex required")?;
+            let bytes = hex_decode(capture)?;
+            let review = tcpform::pcap_import::review_capture(&bytes, protocol)?;
+            json_response(
+                stream,
+                "200 OK",
+                &serde_json::to_value(review).map_err(|error| error.to_string())?,
+            )
+        }
+        ("POST", "/api/v1/pcap/render") => {
+            if let Err(error) = state.authorize(&headers, "run", true) {
+                return api_error(stream, "403 Forbidden", &error);
+            }
+            #[derive(Deserialize)]
+            struct Request {
+                generated_dsl: String,
+                fields: Vec<tcpform::pcap_import::FieldInference>,
+            }
+            let value: Request =
+                serde_json::from_slice(body).map_err(|error| format!("invalid JSON: {error}"))?;
+            let dsl =
+                tcpform::pcap_import::apply_review_fields(&value.generated_dsl, &value.fields)?;
+            json_response(stream, "200 OK", &serde_json::json!({"dsl":dsl}))
+        }
         ("POST", "/api/visualize") => {
             if let Err(error) = state.authorize(&headers, "run", true) {
                 return api_error(stream, "403 Forbidden", &error);
@@ -2365,7 +2840,6 @@ fn serve_request(stream: &mut TcpStream, state: &ServerState) -> Result<(), Stri
                             .and_then(|v| v.get("name"))
                             .and_then(|v| v.as_str())
                             .unwrap_or("unknown");
-                        let _ = state.store.save_run(protocol, "ok", &value);
                         let failed = value
                             .get("documents")
                             .and_then(|v| v.as_object())
@@ -2374,6 +2848,48 @@ fn serve_request(stream: &mut TcpStream, state: &ServerState) -> Result<(), Stri
                                     document.get("status").and_then(|v| v.as_str()) == Some("fail")
                                 })
                             });
+                        let status = if failed { "fail" } else { "ok" };
+                        let request =
+                            serde_json::from_slice::<serde_json::Value>(body).unwrap_or_default();
+                        let metadata = tcpform::storage::RunMetadata {
+                            branch: request
+                                .get("branch")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_string),
+                            commit: request
+                                .get("commit")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_string),
+                            environment: request
+                                .get("environment")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_string),
+                            source: Some("tcpform".into()),
+                            duration_us: value
+                                .get("documents")
+                                .and_then(|value| value.as_object())
+                                .map(|documents| {
+                                    documents
+                                        .values()
+                                        .flat_map(|document| {
+                                            document
+                                                .get("events")
+                                                .and_then(|value| value.as_array())
+                                                .into_iter()
+                                                .flatten()
+                                        })
+                                        .filter_map(|event| {
+                                            event
+                                                .get("timestamp_us")
+                                                .and_then(|value| value.as_u64())
+                                        })
+                                        .max()
+                                        .unwrap_or(0)
+                                }),
+                        };
+                        let _ = state
+                            .store
+                            .save_run_with_metadata(protocol, status, &value, &metadata);
                         if failed {
                             let _ = state.store.record_corpus(protocol, &value);
                         }
@@ -2396,6 +2912,126 @@ fn serve_request(stream: &mut TcpStream, state: &ServerState) -> Result<(), Stri
         }
         _ => http_response(stream, "404 Not Found", "text/plain", b"not found"),
     }
+}
+
+fn query_values(path: &str) -> HashMap<String, String> {
+    path.split_once('?')
+        .map(|(_, query)| {
+            query
+                .split('&')
+                .filter_map(|pair| {
+                    let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+                    (!key.is_empty()).then(|| {
+                        (
+                            percent_decode(key),
+                            percent_decode(&value.replace('+', " ")),
+                        )
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let decoded = std::str::from_utf8(&bytes[index + 1..index + 3])
+                .ok()
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+            if let Some(byte) = decoded {
+                output.push(byte);
+                index += 3;
+                continue;
+            }
+        }
+        output.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&output).into_owned()
+}
+
+fn run_filter_from_path(path: &str) -> Result<tcpform::storage::RunFilter, String> {
+    let query = query_values(path);
+    let string = |name: &str| query.get(name).filter(|value| !value.is_empty()).cloned();
+    let number = |name: &str| -> Result<Option<i64>, String> {
+        query
+            .get(name)
+            .map(|value| {
+                value
+                    .parse::<i64>()
+                    .map_err(|_| format!("{name} must be an integer"))
+            })
+            .transpose()
+    };
+    Ok(tcpform::storage::RunFilter {
+        protocol: string("protocol"),
+        branch: string("branch"),
+        commit: string("commit"),
+        environment: string("environment"),
+        status: string("status"),
+        from: number("from")?,
+        to: number("to")?,
+        limit: query
+            .get("limit")
+            .map(|value| {
+                value
+                    .parse::<usize>()
+                    .map_err(|_| "limit must be an integer".to_string())
+            })
+            .transpose()?
+            .unwrap_or(100),
+    })
+}
+
+fn compare_run_documents(
+    base: &serde_json::Value,
+    current: &serde_json::Value,
+) -> serde_json::Value {
+    let outcomes = |run: &serde_json::Value| {
+        let mut values = HashMap::new();
+        if let Some(documents) = run
+            .pointer("/document/documents")
+            .and_then(|value| value.as_object())
+        {
+            for (name, document) in documents {
+                let failed = document.get("status").and_then(|value| value.as_str())
+                    == Some("fail")
+                    || document
+                        .get("events")
+                        .and_then(|value| value.as_array())
+                        .is_some_and(|events| {
+                            events.iter().any(|event| {
+                                event.get("ok") == Some(&serde_json::Value::Bool(false))
+                            })
+                        });
+                values.insert(name.clone(), if failed { "fail" } else { "pass" });
+            }
+        }
+        values
+    };
+    let before = outcomes(base);
+    let after = outcomes(current);
+    let mut names = before
+        .keys()
+        .chain(after.keys())
+        .cloned()
+        .collect::<Vec<_>>();
+    names.sort();
+    names.dedup();
+    let changes = names
+        .into_iter()
+        .filter_map(|name| {
+            let old = before.get(&name).copied().unwrap_or("missing");
+            let new = after.get(&name).copied().unwrap_or("missing");
+            (old != new).then(|| serde_json::json!({"test":name,"base":old,"current":new}))
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({"base":base["id"],"current":current["id"],"status_changed":base["status"] != current["status"],
+        "duration_delta_us":current["duration_us"].as_i64().unwrap_or(0)-base["duration_us"].as_i64().unwrap_or(0),"test_changes":changes})
 }
 
 fn uploaded_protocol(body: &[u8]) -> Result<Protocol, String> {
@@ -2685,12 +3321,20 @@ fn api_openapi() -> serde_json::Value {
         "paths":{
             "/api/visualize":{"post":{"summary":"Run synchronously","security":[{"bearer":[]}]}},
             "/api/v1/jobs":{"get":{"summary":"List jobs"},"post":{"summary":"Queue a run"}},
+            "/api/v1/admin/retention":{"get":{"summary":"Preview retention and database usage"},"post":{"summary":"Prune expired persisted data after explicit confirmation"}},
             "/api/v1/jobs/{id}":{"get":{"summary":"Get a job"}},
             "/api/v1/jobs/{id}/cancel":{"post":{"summary":"Cancel a job"}},
             "/api/v1/jobs/{id}/retry":{"post":{"summary":"Retry a job"}},
             "/api/v1/runs":{"get":{"summary":"List persisted runs"}},
+            "/api/v1/runs/summary":{"get":{"summary":"Aggregate run trends and flaky tests"}},
+            "/api/v1/runs/compare":{"get":{"summary":"Compare two persisted runs"}},
+            "/api/v1/runs/import":{"post":{"summary":"Import JUnit, SARIF, or OTLP results"}},
+            "/api/v1/runs/{id}":{"get":{"summary":"Get a persisted run"}},
+            "/api/v1/pcap/review":{"post":{"summary":"Decode a capture and build an editable DSL review model"}},
+            "/api/v1/pcap/render":{"post":{"summary":"Validate field edits and regenerate reviewed capture DSL"}},
             "/api/v1/corpus":{"get":{"summary":"List deduplicated failures"}},
             "/api/v1/corpus/revalidate":{"post":{"summary":"Queue regression corpus"}},
+            "/api/v1/corpus/{fingerprint}/regression":{"get":{"summary":"Export a self-contained expected-success regression case"}},
             "/api/v1/baselines":{"post":{"summary":"Create a baseline"}},
             "/api/v1/annotations":{"post":{"summary":"Create an annotation"}}
         }
@@ -3744,6 +4388,7 @@ fn cmd_performance(args: &[String]) -> Result<(), String> {
         "--warmup",
         "--jobs",
         "--deadline-us",
+        "--duration-ms",
         "--baseline",
         "--min-success-rate",
         "--min-throughput",
@@ -3751,6 +4396,7 @@ fn cmd_performance(args: &[String]) -> Result<(), String> {
         "--max-jitter-us",
         "--max-deadline-misses",
         "--max-regression-percent",
+        "--max-p-value",
     ];
     let mut index = 0;
     while index < args.len() {
@@ -3810,11 +4456,16 @@ fn cmd_performance(args: &[String]) -> Result<(), String> {
         .get("--output")
         .ok_or("perf requires --output <report.json>")?;
     let protocols = load(positional[0])?;
+    let duration_ms = parse_u64("--duration-ms")?;
     let config = tcpform::performance::PerformanceConfig {
-        iterations: parse_usize("--iterations", 20)?,
+        iterations: parse_usize(
+            "--iterations",
+            if duration_ms.is_some() { 100_000 } else { 20 },
+        )?,
         warmup: parse_usize("--warmup", 3)?,
         jobs: parse_usize("--jobs", 1)?,
         deadline_us: parse_u64("--deadline-us")?,
+        duration_ms,
     };
     let mut report = tcpform::performance::benchmark(find(&protocols, positional[1])?, &config)?;
     if let Some(path) = values.get("--baseline") {
@@ -3844,20 +4495,27 @@ fn cmd_performance(args: &[String]) -> Result<(), String> {
     }
     let min_throughput = parse_f64("--min-throughput")?;
     let max_regression = parse_f64("--max-regression-percent")?;
+    let max_p_value = parse_f64("--max-p-value")?;
     if min_throughput.is_some_and(|value| !value.is_finite() || value < 0.0) {
         return Err("--min-throughput must be finite and non-negative".into());
     }
     if max_regression.is_some_and(|value| !value.is_finite() || value < 0.0) {
         return Err("--max-regression-percent must be finite and non-negative".into());
     }
+    if max_p_value.is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value)) {
+        return Err("--max-p-value must be between 0.0 and 1.0".into());
+    }
     let gate = tcpform::performance::gate(
         &report,
-        success_rate,
-        min_throughput,
-        parse_u64("--max-p95-us")?,
-        parse_u64("--max-jitter-us")?,
-        parse_usize("--max-deadline-misses", 0)?,
-        max_regression,
+        &tcpform::performance::PerformanceGates {
+            min_success_rate: success_rate,
+            min_throughput,
+            max_p95_us: parse_u64("--max-p95-us")?,
+            max_jitter_us: parse_u64("--max-jitter-us")?,
+            max_deadline_misses: parse_usize("--max-deadline-misses", 0)?,
+            max_regression_percent: max_regression,
+            max_p_value,
+        },
     );
     fs::write(
         output,
@@ -4537,5 +5195,22 @@ mod bundle_tests {
         assert!(verify_bundle_integrity(&bundle)
             .unwrap_err()
             .contains("main.tcpf"));
+    }
+
+    #[test]
+    fn shared_run_queries_decode_filters_and_compare_results() {
+        let filter = run_filter_from_path(
+            "/api/v1/runs?protocol=wire&branch=feature%2Freview&status=fail&limit=25",
+        )
+        .unwrap();
+        assert_eq!(filter.protocol.as_deref(), Some("wire"));
+        assert_eq!(filter.branch.as_deref(), Some("feature/review"));
+        assert_eq!(filter.limit, 25);
+        let base = serde_json::json!({"id":"a","status":"ok","duration_us":100,"document":{"documents":{"smoke":{"status":"ok"}}}});
+        let current = serde_json::json!({"id":"b","status":"fail","duration_us":160,"document":{"documents":{"smoke":{"status":"fail"}}}});
+        let comparison = compare_run_documents(&base, &current);
+        assert_eq!(comparison["status_changed"], true);
+        assert_eq!(comparison["duration_delta_us"], 60);
+        assert_eq!(comparison["test_changes"][0]["test"], "smoke");
     }
 }

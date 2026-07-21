@@ -99,6 +99,12 @@ jobs:
       - run: node dashboard/analysis-tools.test.js
       - run: node dashboard/advanced-tools.test.js
       - run: node dashboard/workbench-tools.test.js
+      - name: Verify browser WASM engine
+        run: |
+          cp dashboard/tcpform-engine.wasm /tmp/tcpform-engine.wasm
+          ./scripts/build-wasm.sh
+          cmp /tmp/tcpform-engine.wasm dashboard/tcpform-engine.wasm
+          node dashboard/wasm-engine.test.js
       - run: ./scripts/docker-visual-lab.sh up
       - run: |
           curl --fail --silent http://127.0.0.1:8088/ | grep -q 'tcpform Visualizer'

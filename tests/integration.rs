@@ -13,6 +13,68 @@ fn load_protocol(src: &str, name: &str) -> Protocol {
 }
 
 #[test]
+fn debugger_compatibility_and_property_case_clis_are_scriptable() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!("tcpform-local-tools-{unique}"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let old = directory.join("old.tcpf");
+    let new = directory.join("new.tcpf");
+    let commands = directory.join("debug.txt");
+    let schema = directory.join("properties.json");
+    let cases = directory.join("cases.tcpf");
+    std::fs::write(&old, "protocol \"p\" { step \"send\" { role=\"client\" action=\"send\" segment { payload=\"x\" } } }").unwrap();
+    std::fs::write(&new, "protocol \"p\" { step \"send\" { role=\"client\" action=\"send\" segment { payload=\"x\" } } step \"log\" { role=\"client\" action=\"log\" message=\"done\" } }").unwrap();
+    std::fs::write(&commands, "step\ninspect\nback\nquit\n").unwrap();
+    std::fs::write(
+        &schema,
+        r#"{"fields":{"code":{"type":"integer","min":0,"max":3}}}"#,
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_tcpform");
+    let debug = std::process::Command::new(binary)
+        .args(["debug"])
+        .arg(&old)
+        .args(["p", "--watch", "step", "--commands"])
+        .arg(&commands)
+        .output()
+        .unwrap();
+    assert!(
+        debug.status.success(),
+        "{}",
+        String::from_utf8_lossy(&debug.stderr)
+    );
+    assert!(String::from_utf8_lossy(&debug.stdout).contains("\"watches\""));
+    assert!(std::process::Command::new(binary)
+        .args(["platform", "dsl-compat"])
+        .arg(&old)
+        .arg(&new)
+        .arg("p")
+        .status()
+        .unwrap()
+        .success());
+    assert!(std::process::Command::new(binary)
+        .args(["platform", "property-cases"])
+        .arg(&schema)
+        .arg("p")
+        .args(["--count", "4", "--seed", "9", "--output"])
+        .arg(&cases)
+        .status()
+        .unwrap()
+        .success());
+    let blocks = tcpform::parse_file(&std::fs::read_to_string(cases).unwrap()).unwrap();
+    assert_eq!(
+        tcpform::model::interpret_cases(&blocks).unwrap()[0]
+            .cases
+            .len(),
+        4
+    );
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn spec_import_generates_reviewable_dsl_and_requirement_coverage() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -338,6 +400,29 @@ fn performance_cli_reports_metrics_baselines_and_ci_gates() {
     let rejected = run(&failed, &["--min-throughput", "1e100"]);
     assert!(!rejected.status.success());
     assert!(failed.exists(), "gate failures must retain the report");
+    let soak = directory.join("soak.json");
+    let soak_result = std::process::Command::new(binary)
+        .arg("perf")
+        .arg(&example)
+        .args(["stop_and_wait", "--output"])
+        .arg(&soak)
+        .args(["--duration-ms", "5", "--warmup", "0", "--jobs", "1"])
+        .output()
+        .unwrap();
+    assert!(
+        soak_result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&soak_result.stderr)
+    );
+    let soak_report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(soak).unwrap()).unwrap();
+    assert_eq!(soak_report["config"]["duration_ms"], 5);
+    assert!(
+        soak_report["metrics"]["latency_us"]["samples"]
+            .as_u64()
+            .unwrap()
+            >= 1
+    );
     std::fs::remove_dir_all(directory).unwrap();
 }
 
@@ -1132,6 +1217,26 @@ fn all_examples_run_to_completion() {
         }
     }
     assert!(ran >= 30, "expected to run >=30 protocols, ran {ran}");
+}
+
+/// Delayed example traffic must not depend on host scheduler timing. This
+/// specifically guards the macOS CI failure that occurred when a 100 ms
+/// receive timeout raced a delayed send on the real clock.
+#[test]
+fn advanced_actions_is_deterministic_under_repetition() {
+    let source = std::fs::read_to_string("examples/advanced_actions.tcpf").unwrap();
+    for attempt in 1..=100 {
+        let blocks = tcpform::parse_file(&source).unwrap();
+        let protocols = interpret(&blocks).unwrap();
+        let trace = Engine::new(protocols[0].clone())
+            .unwrap()
+            .run()
+            .unwrap_or_else(|error| panic!("attempt {attempt}: {error}"));
+        assert!(
+            trace.iter().all(|event| event.ok),
+            "attempt {attempt}: {trace:#?}"
+        );
+    }
 }
 
 /// Regression guard: every `cases` suite in `examples/*.tcpf` must have all
@@ -2210,8 +2315,17 @@ fn json_diagram_and_pcap_outputs_are_well_formed() {
     );
     assert!(json.contains("\"events\":["));
     let json_value: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(json_value["events"][0]["pcap_frame"], 1);
-    assert!(json_value["events"][1]["pcap_frame"].is_null());
+    let events = json_value["events"].as_array().unwrap();
+    let send = events
+        .iter()
+        .find(|event| event["action"] == "send")
+        .unwrap();
+    let receive = events
+        .iter()
+        .find(|event| event["action"] == "recv")
+        .unwrap();
+    assert_eq!(send["pcap_frame"], 1);
+    assert!(receive["pcap_frame"].is_null());
 
     let diagram = tcpform::output::sequence_diagram(&trace);
     assert!(diagram.starts_with("sequenceDiagram\n"));

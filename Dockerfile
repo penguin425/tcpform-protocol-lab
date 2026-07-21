@@ -28,6 +28,8 @@ COPY dashboard/analysis-tools.js /usr/share/nginx/html/analysis-tools.js
 COPY dashboard/advanced-tools.js /usr/share/nginx/html/advanced-tools.js
 COPY dashboard/workbench-tools.js /usr/share/nginx/html/workbench-tools.js
 COPY dashboard/workbench-worker.js /usr/share/nginx/html/workbench-worker.js
+COPY dashboard/wasm-engine.js /usr/share/nginx/html/wasm-engine.js
+COPY dashboard/tcpform-engine.wasm /usr/share/nginx/html/tcpform-engine.wasm
 COPY dashboard/platform-ui.js /usr/share/nginx/html/platform-ui.js
 USER nginx:nginx
 ENTRYPOINT ["nginx", "-g", "daemon off;"]
