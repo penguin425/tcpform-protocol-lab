@@ -732,9 +732,27 @@ pub fn single_html_report(
     diagram: &str,
     pcap: Option<&[u8]>,
 ) -> String {
-    let payload = json!({"source":source,"trace":trace,"diagram":diagram,"pcap_hex":pcap.map(|v|v.iter().map(|b|format!("{b:02x}")).collect::<String>())});
+    single_html_report_with_baseline(source, trace, diagram, pcap, None)
+}
+
+pub fn single_html_report_with_baseline(
+    source: &str,
+    trace: &Value,
+    diagram: &str,
+    pcap: Option<&[u8]>,
+    baseline: Option<&Value>,
+) -> String {
+    let payload = json!({"source":source,"trace":trace,"baseline":baseline,"diagram":diagram,"pcap_hex":pcap.map(|v|v.iter().map(|b|format!("{b:02x}")).collect::<String>())});
     let safe = payload.to_string().replace('<', "\\u003c");
-    format!("<!doctype html><meta charset=utf-8><title>tcpform report</title><h1>tcpform report</h1><pre id=report></pre><script type=application/json id=data>{safe}</script><script>report.textContent=JSON.stringify(JSON.parse(data.textContent),null,2)</script>")
+    format!(
+        r#"<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>tcpform report</title><style>
+:root{{color-scheme:light dark;font:14px system-ui}}body{{margin:0;background:#10151d;color:#e8eef8}}header{{padding:20px 28px;background:#172131;border-bottom:1px solid #33445c}}h1{{margin:0 0 6px}}main{{padding:20px 28px}}nav{{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}}button{{padding:8px 12px;border:1px solid #526782;border-radius:6px;background:#233149;color:inherit;cursor:pointer}}button.active{{background:#1769aa}}section{{display:none}}section.active{{display:block}}.cards{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}}.card,pre,table{{background:#172131;border:1px solid #33445c;border-radius:8px}}.card{{padding:16px}}.value{{font-size:24px;font-weight:700}}pre{{padding:16px;white-space:pre-wrap;overflow:auto}}table{{width:100%;border-collapse:collapse}}th,td{{padding:8px;border-bottom:1px solid #33445c;text-align:left}}.ok{{color:#59d68b}}.fail{{color:#ff7185}}
+</style></head><body><header><h1>tcpform execution report</h1><div id=subtitle>portable, self-contained artifact</div></header><main><nav id=tabs></nav><section id=summary class=active><div class=cards id=cards></div><h2>State and event flow</h2><table><thead><tr><th>#</th><th>role</th><th>step</th><th>action</th><th>result</th></tr></thead><tbody id=events></tbody></table></section><section id=dsl><h2>DSL source</h2><pre id=source></pre></section><section id=sequence><h2>Sequence diagram</h2><pre id=diagram></pre></section><section id=diff><h2>Baseline difference</h2><pre id=difference></pre></section><section id=raw><h2>Complete report JSON</h2><pre id=json></pre></section></main><script type=application/json id=data>{safe}</script><script>
+const model=JSON.parse(document.getElementById('data').textContent);const trace=model.trace.events||[];const views=['summary','dsl','sequence','diff','raw'];const tabs=document.getElementById('tabs');for(const id of views){{const b=document.createElement('button');b.textContent=id;b.onclick=()=>{{document.querySelectorAll('section,nav button').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');b.classList.add('active')}};if(id==='summary')b.classList.add('active');tabs.appendChild(b)}}
+const esc=value=>String(value).replace(/[&<>"']/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c]));const passed=trace.filter(x=>x.ok).length;const cards=[['status',model.trace.status||'unknown'],['events',trace.length],['passed',passed],['failed',trace.length-passed],['capture bytes',model.pcap_hex?model.pcap_hex.length/2:0]];document.getElementById('cards').innerHTML=cards.map(([k,v])=>`<div class=card><div>${{esc(k)}}</div><div class=value>${{esc(v)}}</div></div>`).join('');document.getElementById('events').innerHTML=trace.map((e,i)=>`<tr><td>${{i+1}}</td><td>${{esc(e.role)}}</td><td>${{esc(e.step)}}</td><td>${{esc(e.action)}}</td><td class=${{e.ok?'ok':'fail'}}>${{e.ok?'PASS':'FAIL'}}</td></tr>`).join('');document.getElementById('source').textContent=model.source;document.getElementById('diagram').textContent=model.diagram;document.getElementById('json').textContent=JSON.stringify(model,null,2);
+const baseline=(model.baseline&&model.baseline.events)||[];const changes=[];for(let i=0;i<Math.max(trace.length,baseline.length);i++){{const before=baseline[i],after=trace[i];if(!before)changes.push({{index:i+1,kind:'added',after}});else if(!after)changes.push({{index:i+1,kind:'removed',before}});else{{const fields=['role','step','action','ok','wire_hex'];const changed=fields.filter(field=>JSON.stringify(before[field])!==JSON.stringify(after[field]));if(changed.length)changes.push({{index:i+1,kind:'changed',fields,changed,before,after}})}}}}document.getElementById('difference').textContent=model.baseline?JSON.stringify({{changes,count:changes.length}},null,2):'No baseline supplied. Use --baseline trace.json.';
+</script></body></html>"#
+    )
 }
 pub fn sarif_report(failures: &[(String, String, usize)]) -> Value {
     json!({"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"tcpform"}},"results":failures.iter().map(|(message,file,line)|json!({"level":"error","message":{"text":message},"locations":[{"physicalLocation":{"artifactLocation":{"uri":file},"region":{"startLine":line}}}]})).collect::<Vec<_>>()}]})

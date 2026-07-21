@@ -277,6 +277,38 @@ to the integrated editor. Treat all inferred DSL
 and field boundaries as hypotheses: captures may be incomplete and may contain
 credentials or other sensitive payloads.
 
+### Local productivity suite
+
+The following commands provide a complete local edit/run/diagnose loop without
+requiring a hosted service:
+
+```sh
+tcpform tui protocol.tcpf protocol_name
+tcpform watch protocol.tcpf protocol_name
+tcpform mock protocol.tcpf protocol_name --role server \
+  --listen 127.0.0.1:9000 --framing length
+
+tcpform import-har traffic.har --protocol captured_http --output captured.tcpf
+sudo tcpform capture-import --interface eth0 --duration-ms 5000 \
+  --filter 'tcp port 9000' --protocol captured --output captured.tcpf
+
+tcpform lint protocol.tcpf --config tcpform-lint.json --deny-warnings
+tcpform generate-faults protocol.tcpf --output faults --budget 50 --seed 42 \
+  --execute protocol_name
+tcpform regression-bisect --good v0.7.2 --bad HEAD protocol.tcpf protocol_name
+
+tcpform learn tcpform-tutorial --run
+tcpform report protocol.tcpf protocol_name --output report.html \
+  --baseline previous-trace.json
+```
+
+`tcpform-lint.json` accepts `require_receive_timeout`, `max_timeout_ms`,
+`forbidden_actions`, `step_name_pattern`, `report_unused_variables`, and
+`deny_warnings`. `capture-import` invokes `tcpdump`
+only for a live capture; `--capture existing.pcapng` provides the same import
+path without privileges. The VS Code extension discovers `cases` blocks in the
+Test Explorer and runs an individual case with its protocol and source file.
+
 `tcpform import-kaitai` imports the fixed-layout subset of a Kaitai Struct
 `.ksy` schema into a tcpform `header_schema`. Integer, bit, fixed-size string,
 byte, and `contents` fields are assigned deterministic offsets; fields longer

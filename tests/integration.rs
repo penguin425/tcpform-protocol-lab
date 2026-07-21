@@ -13,6 +13,282 @@ fn load_protocol(src: &str, name: &str) -> Protocol {
 }
 
 #[test]
+fn productivity_suite_clis_generate_run_and_inspect_artifacts() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!("tcpform-productivity-{unique}"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let binary = env!("CARGO_BIN_EXE_tcpform");
+    let run = |arguments: &[&str]| {
+        let output = std::process::Command::new(binary)
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    };
+
+    let tutorial = directory.join("tutorial");
+    run(&["learn", tutorial.to_str().unwrap()]);
+    for lesson in ["01-hello.tcpf", "02-assertions.tcpf", "03-faults.tcpf"] {
+        run(&["test", tutorial.join(lesson).to_str().unwrap()]);
+    }
+
+    let har = directory.join("input.har");
+    let source = directory.join("har.tcpf");
+    std::fs::write(&har, r#"{"log":{"entries":[{"request":{"method":"QUERY","url":"https://example.test/items"},"response":{"status":200}}]}}"#).unwrap();
+    run(&[
+        "import-har",
+        har.to_str().unwrap(),
+        "--protocol",
+        "web",
+        "--output",
+        source.to_str().unwrap(),
+    ]);
+    run(&["test", source.to_str().unwrap()]);
+    run(&["watch", source.to_str().unwrap(), "web", "--once"]);
+    run(&["lint", source.to_str().unwrap(), "--deny-warnings"]);
+
+    let commands = directory.join("tui.txt");
+    std::fs::write(&commands, "next\nnext\nprevious\nquit\n").unwrap();
+    let tui = run(&[
+        "tui",
+        source.to_str().unwrap(),
+        "web",
+        "--case",
+        "har_replay",
+        "--commands",
+        commands.to_str().unwrap(),
+    ]);
+    assert!(String::from_utf8_lossy(&tui.stdout).contains("tcpform TUI"));
+
+    let trace = Engine::new(load_protocol(
+        &std::fs::read_to_string(&source).unwrap(),
+        "web",
+    ))
+    .unwrap()
+    .run()
+    .unwrap();
+    let baseline = directory.join("baseline.json");
+    std::fs::write(&baseline, tcpform::output::trace_json("ok", None, &trace)).unwrap();
+    let report = directory.join("report.html");
+    run(&[
+        "report",
+        source.to_str().unwrap(),
+        "web",
+        "--output",
+        report.to_str().unwrap(),
+        "--baseline",
+        baseline.to_str().unwrap(),
+    ]);
+    let html = std::fs::read_to_string(report).unwrap();
+    assert!(html.contains("pcap_hex"));
+    assert!(html.contains("QUERY"));
+    let failing = directory.join("failing.tcpf");
+    let failure_report = directory.join("failure.html");
+    std::fs::write(&failing, "protocol \"failure\" { step \"check\" { role=\"client\" action=\"assert\" assert { missing = 1 } } }").unwrap();
+    run(&[
+        "report",
+        failing.to_str().unwrap(),
+        "failure",
+        "--output",
+        failure_report.to_str().unwrap(),
+    ]);
+    assert!(std::fs::read_to_string(failure_report)
+        .unwrap()
+        .contains("\"status\":\"fail\""));
+
+    let faults = directory.join("faults");
+    run(&[
+        "generate-faults",
+        "--output",
+        faults.to_str().unwrap(),
+        "--budget",
+        "8",
+        "--seed",
+        "7",
+        "--execute",
+        "web",
+        source.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        std::fs::read_dir(&faults)
+            .unwrap()
+            .filter(|item| item
+                .as_ref()
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|value| value == "tcpf"))
+            .count(),
+        8
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(faults.join("manifest.json")).unwrap())
+            .unwrap();
+    assert_eq!(manifest["budget"], 8);
+    assert_eq!(manifest["executed_protocol"], "web");
+    assert!(manifest["variants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|variant| variant["status"].is_string()));
+
+    let capture = directory.join("source.pcapng");
+    let captured = directory.join("captured.tcpf");
+    std::fs::write(&capture, tcpform::output::trace_pcapng(&trace)).unwrap();
+    run(&[
+        "capture-import",
+        "--capture",
+        capture.to_str().unwrap(),
+        "--protocol",
+        "captured",
+        "--output",
+        captured.to_str().unwrap(),
+    ]);
+    assert!(std::fs::read_to_string(captured)
+        .unwrap()
+        .contains("protocol \"captured\""));
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn regression_bisect_is_read_only_and_finds_first_bad_commit() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!("tcpform-bisect-{unique}"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let git = |arguments: &[&str]| {
+        let output = std::process::Command::new("git")
+            .current_dir(&directory)
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "tcpform test"]);
+    git(&["config", "user.email", "test@example.invalid"]);
+    std::fs::write(
+        directory.join("protocol.tcpf"),
+        "protocol \"p\" { step \"ok\" { role=\"client\" action=\"log\" } }",
+    )
+    .unwrap();
+    git(&["add", "protocol.tcpf"]);
+    git(&["commit", "-q", "-m", "good"]);
+    let good = git(&["rev-parse", "HEAD"]);
+    std::fs::write(directory.join("protocol.tcpf"), "protocol \"p\" { step \"bad\" { role=\"client\" action=\"assert\" assert { missing = 1 } } }").unwrap();
+    git(&["add", "protocol.tcpf"]);
+    git(&["commit", "-q", "-m", "bad"]);
+    let bad = git(&["rev-parse", "HEAD"]);
+    let before = git(&["rev-parse", "HEAD"]);
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tcpform"))
+        .current_dir(&directory)
+        .args([
+            "regression-bisect",
+            "--good",
+            &good,
+            "--bad",
+            &bad,
+            "protocol.tcpf",
+            "p",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["first_bad"], bad);
+    assert_eq!(git(&["rev-parse", "HEAD"]), before);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn mock_command_serves_one_external_protocol_session() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let source = std::env::temp_dir().join(format!("tcpform-mock-{unique}.tcpf"));
+    std::fs::write(&source, r#"
+      protocol "echo" {
+        step "request" { role="client" action="send" to="server" segment { payload="ping" } }
+        step "receive_request" { role="server" action="recv" expect { from="client" payload="ping" } timer { timeout="2s" } }
+        step "response" { role="server" action="send" to="client" depends_on=["receive_request"] segment { payload="pong" } }
+        step "receive_response" { role="client" action="recv" depends_on=["request"] expect { from="server" payload="pong" } timer { timeout="2s" } }
+      }
+    "#).unwrap();
+    let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = reservation.local_addr().unwrap().to_string();
+    drop(reservation);
+    let binary = env!("CARGO_BIN_EXE_tcpform");
+    let mut server = std::process::Command::new(binary)
+        .args([
+            "mock",
+            source.to_str().unwrap(),
+            "echo",
+            "--role",
+            "server",
+            "--listen",
+            &address,
+            "--framing",
+            "length",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(150));
+    let client = std::process::Command::new(binary)
+        .args([
+            "run",
+            "--external",
+            "--role",
+            "client",
+            "--connect",
+            &address,
+            "--framing",
+            "length",
+            source.to_str().unwrap(),
+            "echo",
+        ])
+        .output()
+        .unwrap();
+    if !client.status.success() {
+        let _ = server.kill();
+    }
+    assert!(
+        client.status.success(),
+        "{}",
+        String::from_utf8_lossy(&client.stderr)
+    );
+    let server_output = server.wait_with_output().unwrap();
+    assert!(
+        server_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&server_output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&server_output.stdout).contains("listening"));
+    std::fs::remove_file(source).unwrap();
+}
+
+#[test]
 fn debugger_compatibility_and_property_case_clis_are_scriptable() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

@@ -1,11 +1,19 @@
 'use strict';
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { protocolDeclarations, rewriteVisualizerHtml } = require('./helpers');
+const { protocolDeclarations, caseDeclarations, rewriteVisualizerHtml } = require('./helpers');
 
 test('finds protocol declarations and line numbers', () => {
   assert.deepEqual(protocolDeclarations('# c\nprotocol "dns" {\n}\n  protocol "http" {'), [
     { name: 'dns', line: 1 }, { name: 'http', line: 3 },
+  ]);
+});
+
+test('finds cases with their protocol and line', () => {
+  const source = 'protocol "p" {}\ncases "p" {\n  case "ok" {\n    vars { nested = { value = 1 } }\n    expect = "pass"\n  }\n  case "bad" { expect = "fail" }\n}\n';
+  assert.deepEqual(caseDeclarations(source), [
+    { protocol: 'p', name: 'ok', line: 2 },
+    { protocol: 'p', name: 'bad', line: 6 },
   ]);
 });
 

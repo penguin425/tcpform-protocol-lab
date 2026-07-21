@@ -9,12 +9,15 @@
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::io::{IsTerminal, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 use std::time::{Duration, Instant};
-use std::{env, fs, process};
+use std::{env, fs, process, thread};
 
 use tcpform::model::interpret;
 use tcpform::{load_blocks, Engine, EngineError, Protocol};
@@ -45,9 +48,15 @@ fn main() {
         "ci-report" => cmd_ci_report(&args[2..]),
         "doctor" => cmd_doctor(&args[2..]),
         "debug" => cmd_debug(&args[2..]),
+        "tui" => cmd_tui(&args[2..]),
+        "watch" => cmd_watch(&args[2..]),
+        "mock" => cmd_mock(&args[2..]),
+        "regression-bisect" => cmd_regression_bisect(&args[2..]),
         "completion" => cmd_completion(&args[2..]),
         "spec" => cmd_spec(&args[2..]),
         "import-pcap" => cmd_import_pcap(&args[2..]),
+        "import-har" => cmd_import_har(&args[2..]),
+        "capture-import" => cmd_capture_import(&args[2..]),
         "import-kaitai" => cmd_import_kaitai(&args[2..]),
         "packetdrill" => cmd_packetdrill(&args[2..]),
         "lsp" => cmd_lsp(),
@@ -63,6 +72,9 @@ fn main() {
         "standards" => cmd_standards(&args[2..]),
         "perf" => cmd_performance(&args[2..]),
         "generate-faults" => cmd_generate_faults(&args[2..]),
+        "lint" => cmd_lint(&args[2..]),
+        "learn" => cmd_learn(&args[2..]),
+        "report" => cmd_report(&args[2..]),
         "fuzz" => cmd_native_fuzz(&args[2..]),
         "fuzz-export" => cmd_fuzz_export(&args[2..]),
         "plugin" => cmd_plugin(&args[2..]),
@@ -112,10 +124,16 @@ fn usage() {
          tcpform ci-report <baseline.json> <current.json> [--markdown <file>] [--json <file>] [--fail-on-regression]\n  \
          tcpform doctor [--json] [project-directory]\n  \
          tcpform debug <source> <protocol> [--break <step>] [--watch <field>] [--commands <file>]\n  \
+         tcpform tui <source> [protocol] [--case <name>] [--commands <file>]\n  \
+         tcpform watch <source> [protocol] [--debounce-ms <n>] [--once]\n  \
+         tcpform mock <source> <protocol> --role <role> --listen <address> [--udp] [--framing <kind>] [--sessions <n>|--forever]\n  \
+         tcpform regression-bisect --good <rev> --bad <rev> <source> <protocol>\n  \
          tcpform completion <bash|zsh>\n  \
          tcpform spec import <spec.txt> --protocol <name> --output <file.tcpf> --requirements <requirements.json> [--source <reference>]\n  \
          tcpform spec coverage <requirements.json> <trace.json> [--output <coverage.json>]\n  \
          tcpform import-pcap <capture.pcap|capture.pcapng> --protocol <name> --output <file> [--analysis <report.json>]\n  \
+         tcpform import-har <capture.har> --protocol <name> --output <file>\n  \
+         tcpform capture-import --interface <name> --duration-ms <n> --protocol <name> --output <file> [--filter <expression>] [--capture <pcap>]\n  \
          tcpform import-kaitai <schema.ksy> --output <file> [--protocol <name>]\n  \
          tcpform packetdrill export <source> <protocol> --local-role <role> --output <file.pkt>\n  \
          tcpform packetdrill import <file.pkt> --protocol <name> --local-role <role> --peer-role <role> --output <file.tcpf>\n  \
@@ -131,7 +149,10 @@ fn usage() {
          tcpform observe <trace.json> --output <otlp.json> --start-unix-ns <n> [--ebpf <events.jsonl>] [--service-name <name>] [--correlation-window-ns <n>]\n  \
          tcpform standards <ttcn3-export|ttcn3-import|asn1-import> ...\n  \
          tcpform perf <source> <protocol> --output <report.json> [--iterations <n>|--duration-ms <n>] [--warmup <n>] [--jobs <n>] [--baseline <report>] [--max-p-value <0..1>] [performance gates]\n  \
-         tcpform generate-faults --output <directory> <source>\n  \
+         tcpform generate-faults --output <directory> [--budget <n>] [--seed <n>] [--execute <protocol>] <source>\n  \
+         tcpform lint <source> [--config <tcpform-lint.json>] [--json] [--deny-warnings]\n  \
+         tcpform learn [directory] [--force] [--run]\n  \
+         tcpform report <source> <protocol> --output <report.html> [--baseline <trace.json>]\n  \
          tcpform fuzz <source> <protocol> --role <role> --connect <address> --output <directory> [--iterations <n>] [--seed <n>] [--framing <kind>] [--coverage-file <path>] [--max-input-bytes <n>] [--stop-on-crash]\n  \
          tcpform fuzz-export <boofuzz|aflnet> <source> <protocol> --role <role> --output <path> [--host <host> --port <port>]\n  \
          tcpform plugin <manifest.json> <action|matcher|decoder|report> <name> <input.json>\n  \
@@ -1656,6 +1677,445 @@ fn cmd_debug(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn cmd_tui(args: &[String]) -> Result<(), String> {
+    let source = args.first().ok_or("tui requires <source> <protocol>")?;
+    let supplied_name = args.get(1).filter(|value| !value.starts_with('-'));
+    let commands = args
+        .iter()
+        .position(|value| value == "--commands")
+        .map(|index| args.get(index + 1).ok_or("--commands requires a file"))
+        .transpose()?
+        .map(|path| fs::read_to_string(path).map_err(|error| error.to_string()))
+        .transpose()?;
+    let selected_case = args
+        .iter()
+        .position(|value| value == "--case")
+        .map(|index| args.get(index + 1).ok_or("--case requires a name"))
+        .transpose()?;
+    let (protocols, suites) = load_with_cases(source)?;
+    let name = if let Some(name) = supplied_name {
+        name.clone()
+    } else if std::io::stdin().is_terminal() {
+        select_terminal(
+            "protocol",
+            protocols.iter().map(|value| value.name.as_str()).collect(),
+        )?
+    } else {
+        protocols
+            .first()
+            .map(|value| value.name.clone())
+            .ok_or("source contains no protocols")?
+    };
+    let protocol = find(&protocols, &name)?.clone();
+    let available_cases = suites
+        .iter()
+        .filter(|suite| suite.protocol == name)
+        .flat_map(|suite| suite.cases.iter())
+        .collect::<Vec<_>>();
+    let selected_case =
+        if selected_case.is_none() && !available_cases.is_empty() && std::io::stdin().is_terminal()
+        {
+            let mut choices = vec!["(direct protocol run)"];
+            choices.extend(available_cases.iter().map(|case| case.name.as_str()));
+            let choice = select_terminal("case", choices)?;
+            (choice != "(direct protocol run)").then_some(choice)
+        } else {
+            selected_case.cloned()
+        };
+    let case = selected_case
+        .as_ref()
+        .map(|case_name| {
+            suites
+                .iter()
+                .filter(|suite| suite.protocol == name)
+                .flat_map(|suite| suite.cases.iter())
+                .find(|case| case.name == *case_name)
+                .cloned()
+                .ok_or_else(|| format!("case `{case_name}` not found for protocol `{name}`"))
+        })
+        .transpose()?;
+    let execute = || -> Result<Vec<tcpform::TraceEvent>, String> {
+        if let Some(case) = &case {
+            return Ok(Engine::new(protocol.clone())
+                .map_err(|error| error.to_string())?
+                .run_cases(std::slice::from_ref(case))
+                .remove(0)
+                .trace);
+        }
+        match Engine::new(protocol.clone())
+            .map_err(|error| error.to_string())?
+            .run()
+        {
+            Ok(trace) => Ok(trace),
+            Err(EngineError::Runtime { trace, .. }) => Ok(trace),
+            Err(error) => Err(error.to_string()),
+        }
+    };
+    let mut trace = execute()?;
+    let mut cursor = 0usize;
+    let scripted = commands.is_some();
+    let lines = commands.unwrap_or_default();
+    let mut script = lines.lines();
+    loop {
+        render_tui(
+            &protocol,
+            &trace,
+            cursor,
+            !scripted && std::io::stdout().is_terminal(),
+        );
+        let command = if scripted {
+            match script.next() {
+                Some(value) => value.trim().to_string(),
+                None => break,
+            }
+        } else if !std::io::stdin().is_terminal() {
+            break;
+        } else {
+            print!("[n]ext [p]revious [r]erun [q]uit > ");
+            std::io::stdout()
+                .flush()
+                .map_err(|error| error.to_string())?;
+            let mut value = String::new();
+            if std::io::stdin()
+                .read_line(&mut value)
+                .map_err(|error| error.to_string())?
+                == 0
+            {
+                break;
+            }
+            value.trim().to_string()
+        };
+        match command.as_str() {
+            "n" | "next" => cursor = (cursor + 1).min(trace.len().saturating_sub(1)),
+            "p" | "previous" | "back" => cursor = cursor.saturating_sub(1),
+            "r" | "rerun" => {
+                trace = execute()?;
+                cursor = 0;
+            }
+            "q" | "quit" | "exit" => break,
+            "" => {}
+            value => return Err(format!("unknown TUI command `{value}`")),
+        }
+    }
+    Ok(())
+}
+
+fn select_terminal(kind: &str, choices: Vec<&str>) -> Result<String, String> {
+    if choices.is_empty() {
+        return Err(format!("no {kind}s available"));
+    }
+    println!("select {kind}:");
+    for (index, choice) in choices.iter().enumerate() {
+        println!("  {}. {choice}", index + 1);
+    }
+    print!("> ");
+    std::io::stdout()
+        .flush()
+        .map_err(|error| error.to_string())?;
+    let mut input = String::new();
+    std::io::stdin()
+        .read_line(&mut input)
+        .map_err(|error| error.to_string())?;
+    let index = input
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| format!("invalid {kind} selection"))?;
+    choices
+        .get(index.saturating_sub(1))
+        .map(|value| (*value).to_string())
+        .ok_or_else(|| format!("invalid {kind} selection"))
+}
+
+fn render_tui(protocol: &Protocol, trace: &[tcpform::TraceEvent], cursor: usize, clear: bool) {
+    if clear {
+        print!("\x1b[2J\x1b[H");
+    }
+    println!(
+        "tcpform TUI — {} — {}/{} events",
+        protocol.name,
+        cursor.saturating_add(1).min(trace.len()),
+        trace.len()
+    );
+    println!("{:-<78}", "");
+    for (index, event) in trace.iter().enumerate() {
+        let marker = if index == cursor { ">" } else { " " };
+        println!(
+            "{marker} {:>3} {:<12} {:<18} {:<10} {}",
+            index + 1,
+            event.role,
+            event.step,
+            event.action.as_str(),
+            if event.ok { "ok" } else { "FAIL" }
+        );
+    }
+    println!("{:-<78}", "");
+    if let Some(event) = trace.get(cursor) {
+        println!("detail: {}", event.detail);
+        println!(
+            "peer: {}  flags: {:?}",
+            event.peer.as_deref().unwrap_or("-"),
+            event.flags
+        );
+        println!("wire: {}", tcpform::bytes_to_hex(&event.wire_data));
+    }
+}
+
+fn cmd_watch(args: &[String]) -> Result<(), String> {
+    let mut positional = Vec::new();
+    let mut debounce_ms = 250u64;
+    let mut once = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--debounce-ms" => {
+                index += 1;
+                debounce_ms = args
+                    .get(index)
+                    .ok_or("--debounce-ms requires a value")?
+                    .parse()
+                    .map_err(|_| "--debounce-ms must be an integer")?;
+            }
+            "--once" => once = true,
+            option if option.starts_with('-') => {
+                return Err(format!("unknown watch option `{option}`"))
+            }
+            value => positional.push(value.to_string()),
+        }
+        index += 1;
+    }
+    let source = positional
+        .first()
+        .ok_or("watch requires <source> [protocol]")?;
+    let run = || -> Result<(), String> {
+        let mut test_args = vec![source.clone()];
+        if let Some(protocol) = positional.get(1) {
+            test_args.push(protocol.clone());
+        }
+        cmd_test(&test_args)
+    };
+    let mut result = run();
+    if once {
+        return result;
+    }
+    let mut stamp = source_stamp(std::path::Path::new(source))?;
+    println!("watching {source}; press Ctrl-C to stop");
+    loop {
+        thread::sleep(Duration::from_millis(debounce_ms.max(25)));
+        let next = source_stamp(std::path::Path::new(source))?;
+        if next != stamp {
+            stamp = next;
+            println!("\nchange detected; rerunning...");
+            result = run();
+            if let Err(error) = &result {
+                eprintln!("watch: {error}");
+            }
+        }
+    }
+}
+
+fn source_stamp(path: &std::path::Path) -> Result<u64, String> {
+    fn visit(
+        path: &std::path::Path,
+        seen: &mut HashSet<std::path::PathBuf>,
+        state: &mut std::collections::hash_map::DefaultHasher,
+    ) -> Result<(), String> {
+        let canonical = path
+            .canonicalize()
+            .map_err(|error| format!("cannot watch {}: {error}", path.display()))?;
+        if !seen.insert(canonical.clone()) {
+            return Ok(());
+        }
+        let metadata = fs::metadata(&canonical).map_err(|error| error.to_string())?;
+        canonical.hash(state);
+        metadata.len().hash(state);
+        metadata
+            .modified()
+            .map_err(|error| error.to_string())?
+            .hash(state);
+        let source = fs::read_to_string(&canonical).map_err(|error| error.to_string())?;
+        for line in source.lines() {
+            let trimmed = line.trim();
+            if let Some(import) = trimmed
+                .strip_prefix("import ")
+                .and_then(|rest| rest.trim().strip_prefix('"'))
+                .and_then(|rest| rest.split_once('"').map(|pair| pair.0))
+            {
+                visit(
+                    &canonical
+                        .parent()
+                        .unwrap_or_else(|| std::path::Path::new("."))
+                        .join(import),
+                    seen,
+                    state,
+                )?;
+            }
+        }
+        Ok(())
+    }
+    let mut state = std::collections::hash_map::DefaultHasher::new();
+    visit(path, &mut HashSet::new(), &mut state)?;
+    Ok(state.finish())
+}
+
+fn cmd_mock(args: &[String]) -> Result<(), String> {
+    let source = args.first().ok_or("mock requires <source> <protocol>")?;
+    let protocol = args.get(1).ok_or("mock requires <source> <protocol>")?;
+    let after = |flag: &str| -> Result<&str, String> {
+        let index = args
+            .iter()
+            .position(|value| value == flag)
+            .ok_or_else(|| format!("mock requires {flag}"))?;
+        args.get(index + 1)
+            .map(String::as_str)
+            .ok_or_else(|| format!("{flag} requires a value"))
+    };
+    let role = after("--role")?;
+    let address = after("--listen")?;
+    let udp = args.iter().any(|value| value == "--udp");
+    let forever = args.iter().any(|value| value == "--forever");
+    let sessions = if forever {
+        usize::MAX
+    } else if let Some(index) = args.iter().position(|value| value == "--sessions") {
+        let count = args
+            .get(index + 1)
+            .ok_or("--sessions requires a value")?
+            .parse::<usize>()
+            .map_err(|_| "--sessions must be an integer")?;
+        if count == 0 || count > 10_000 {
+            return Err("--sessions must be between 1 and 10000".into());
+        }
+        count
+    } else {
+        1
+    };
+    let framing = if let Some(index) = args.iter().position(|value| value == "--framing") {
+        parse_framing(args.get(index + 1).ok_or("--framing requires a value")?)?
+    } else {
+        tcpform::Framing::Raw
+    };
+    let selected = find(&load(source)?, protocol)?.clone();
+    let session_label = if forever {
+        "until interrupted".to_string()
+    } else {
+        format!("{sessions} session(s)")
+    };
+    println!("mock `{protocol}` role `{role}` listening on {address} ({session_label})");
+    for session in 0..sessions {
+        let engine = Engine::new(selected.clone()).map_err(|error| error.to_string())?;
+        let trace = if udp {
+            engine.run_external_udp(role, address, true)
+        } else {
+            engine.run_external_tcp_framed(role, address, true, framing.clone())
+        }
+        .map_err(|error| error.to_string())?;
+        println!("session {} complete", session + 1);
+        print_trace(&trace);
+    }
+    Ok(())
+}
+
+fn cmd_regression_bisect(args: &[String]) -> Result<(), String> {
+    let value_after = |flag: &str| -> Result<&str, String> {
+        let index = args
+            .iter()
+            .position(|value| value == flag)
+            .ok_or_else(|| format!("regression-bisect requires {flag}"))?;
+        args.get(index + 1)
+            .map(String::as_str)
+            .ok_or_else(|| format!("{flag} requires a value"))
+    };
+    let good = value_after("--good")?;
+    let bad = value_after("--bad")?;
+    let positional = args
+        .iter()
+        .enumerate()
+        .filter(|(index, value)| {
+            !value.starts_with('-')
+                && (*index == 0 || !matches!(args[*index - 1].as_str(), "--good" | "--bad"))
+        })
+        .map(|(_, value)| value.as_str())
+        .collect::<Vec<_>>();
+    if positional.len() != 2 {
+        return Err("regression-bisect expects <source> <protocol>".into());
+    }
+    let source = positional[0];
+    let protocol = positional[1];
+    let output = Command::new("git")
+        .args([
+            "rev-list",
+            "--ancestry-path",
+            "--reverse",
+            &format!("{good}..{bad}"),
+        ])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let mut commits = vec![good.to_string()];
+    commits.extend(
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::to_string),
+    );
+    if commits.last().is_none_or(|value| value != bad) {
+        commits.push(bad.to_string());
+    }
+    let passes = |revision: &str| -> Result<bool, String> {
+        let listing = Command::new("git")
+            .args(["ls-tree", "-r", "--name-only", revision])
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !listing.status.success() {
+            return Err(format!("cannot list files at {revision}"));
+        }
+        let files = String::from_utf8(listing.stdout).map_err(|_| "Git paths are not UTF-8")?;
+        let mut sources = HashMap::new();
+        for path in files.lines().filter(|path| path.ends_with(".tcpf")) {
+            let output = Command::new("git")
+                .args(["show", &format!("{revision}:{path}")])
+                .output()
+                .map_err(|error| error.to_string())?;
+            if output.status.success() {
+                sources.insert(
+                    path.to_string(),
+                    String::from_utf8(output.stdout)
+                        .map_err(|_| format!("{path} is not UTF-8 at {revision}"))?,
+                );
+            }
+        }
+        if !sources.contains_key(source) {
+            return Err(format!("cannot read {source} at {revision}"));
+        }
+        let blocks = tcpform::load_blocks_from_sources(source, &sources)?;
+        let protocols = interpret(&blocks).map_err(|error| error.to_string())?;
+        Ok(Engine::new(find(&protocols, protocol)?.clone())
+            .map_err(|error| error.to_string())?
+            .run()
+            .is_ok())
+    };
+    if !passes(good)? {
+        return Err("--good revision does not pass".into());
+    }
+    if passes(bad)? {
+        return Err("--bad revision does not fail".into());
+    }
+    let (mut low, mut high) = (0usize, commits.len() - 1);
+    while high - low > 1 {
+        let middle = low + (high - low) / 2;
+        if passes(&commits[middle])? {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    println!(
+        "{}",
+        serde_json::json!({"first_bad":commits[high],"last_good":commits[low],"evaluated_range":commits.len()})
+    );
+    Ok(())
+}
+
 fn cmd_completion(args: &[String]) -> Result<(), String> {
     if args.len() != 1 {
         return Err("usage: tcpform completion <bash|zsh>".into());
@@ -1714,6 +2174,104 @@ fn cmd_import_pcap(args: &[String]) -> Result<(), String> {
         println!("generated {path}");
     }
     println!("generated {output}");
+    Ok(())
+}
+
+fn cmd_import_har(args: &[String]) -> Result<(), String> {
+    let input = args
+        .first()
+        .filter(|value| !value.starts_with('-'))
+        .ok_or("usage: tcpform import-har <capture.har> --protocol <name> --output <file>")?;
+    let value_after = |flag: &str| -> Result<&str, String> {
+        let index = args
+            .iter()
+            .position(|value| value == flag)
+            .ok_or_else(|| format!("import-har requires {flag}"))?;
+        args.get(index + 1)
+            .map(String::as_str)
+            .ok_or_else(|| format!("{flag} requires a value"))
+    };
+    let protocol = value_after("--protocol")?;
+    let output = value_after("--output")?;
+    let har: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(input).map_err(|error| format!("cannot read {input}: {error}"))?,
+    )
+    .map_err(|error| format!("invalid HAR JSON: {error}"))?;
+    let source = tcpform::productivity::har_to_tcpform(&har, protocol)?;
+    let blocks = tcpform::parse_file(&source).map_err(|error| error.to_string())?;
+    interpret(&blocks).map_err(|error| error.to_string())?;
+    fs::write(output, source).map_err(|error| format!("cannot write {output}: {error}"))
+}
+
+fn cmd_capture_import(args: &[String]) -> Result<(), String> {
+    let after = |flag: &str| -> Result<Option<&str>, String> {
+        args.iter()
+            .position(|value| value == flag)
+            .map(|index| {
+                args.get(index + 1)
+                    .map(String::as_str)
+                    .ok_or_else(|| format!("{flag} requires a value"))
+            })
+            .transpose()
+    };
+    let protocol = after("--protocol")?.ok_or("capture-import requires --protocol")?;
+    let output = after("--output")?.ok_or("capture-import requires --output")?;
+    let owned_capture;
+    let capture = if let Some(path) = after("--capture")? {
+        path
+    } else {
+        let interface = after("--interface")?.ok_or("capture-import requires --interface")?;
+        let duration = after("--duration-ms")?
+            .unwrap_or("5000")
+            .parse::<u64>()
+            .map_err(|_| "--duration-ms must be an integer")?;
+        if duration == 0 || duration > 3_600_000 {
+            return Err("--duration-ms must be between 1 and 3600000".into());
+        }
+        owned_capture = env::temp_dir().join(format!(
+            "tcpform-live-capture-{}-{}.pcap",
+            process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let mut command = Command::new("tcpdump");
+        command.args(["-i", interface, "-U", "-w"]);
+        command.arg(&owned_capture);
+        if let Some(filter) = after("--filter")? {
+            command.arg(filter);
+        }
+        command
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::inherit());
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("cannot start tcpdump: {error}"))?;
+        thread::sleep(Duration::from_millis(duration));
+        #[cfg(unix)]
+        {
+            let _ = Command::new("kill")
+                .args(["-INT", &child.id().to_string()])
+                .status();
+        }
+        #[cfg(not(unix))]
+        child.kill().map_err(|error| error.to_string())?;
+        let status = child.wait().map_err(|error| error.to_string())?;
+        if !status.success() && status.code().is_some() {
+            return Err(format!("tcpdump exited with {status}"));
+        }
+        owned_capture
+            .to_str()
+            .ok_or("temporary capture path is not UTF-8")?
+    };
+    let bytes = fs::read(capture).map_err(|error| format!("cannot read capture: {error}"))?;
+    let source = tcpform::pcap_import::import_capture(&bytes, protocol)?;
+    fs::write(output, source).map_err(|error| format!("cannot write {output}: {error}"))?;
+    if after("--capture")?.is_none() {
+        let _ = fs::remove_file(capture);
+    }
+    println!("wrote {output}");
     Ok(())
 }
 
@@ -4529,34 +5087,308 @@ fn cmd_performance(args: &[String]) -> Result<(), String> {
 }
 
 fn cmd_generate_faults(args: &[String]) -> Result<(), String> {
-    let output_index = args
-        .iter()
-        .position(|arg| arg == "--output")
-        .ok_or("generate-faults requires --output")?;
-    let output = args
-        .get(output_index + 1)
-        .ok_or("--output requires directory")?;
-    let source_path = args
-        .iter()
-        .enumerate()
-        .find(|(index, _)| *index != output_index && *index != output_index + 1)
-        .map(|(_, value)| value)
-        .ok_or("generate-faults requires source")?;
+    let mut output = None;
+    let mut source_path = None;
+    let mut budget = 5usize;
+    let mut seed = 42u64;
+    let mut execute = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--output" => {
+                index += 1;
+                output = Some(args.get(index).ok_or("--output requires directory")?);
+            }
+            "--budget" => {
+                index += 1;
+                budget = args
+                    .get(index)
+                    .ok_or("--budget requires a value")?
+                    .parse()
+                    .map_err(|_| "--budget must be an integer")?;
+            }
+            "--seed" => {
+                index += 1;
+                seed = args
+                    .get(index)
+                    .ok_or("--seed requires a value")?
+                    .parse()
+                    .map_err(|_| "--seed must be an integer")?;
+            }
+            "--execute" => {
+                index += 1;
+                execute = Some(
+                    args.get(index)
+                        .ok_or("--execute requires a protocol")?
+                        .as_str(),
+                );
+            }
+            option if option.starts_with('-') => {
+                return Err(format!("unknown generate-faults option `{option}`"))
+            }
+            value if source_path.is_none() => source_path = Some(value),
+            _ => return Err("generate-faults accepts one source".into()),
+        }
+        index += 1;
+    }
+    if budget == 0 || budget > 1_000 {
+        return Err("--budget must be between 1 and 1000".into());
+    }
+    let output = output.ok_or("generate-faults requires --output")?;
+    let source_path = source_path.ok_or("generate-faults requires source")?;
     let source = fs::read_to_string(source_path).map_err(|e| e.to_string())?;
     fs::create_dir_all(output).map_err(|e| e.to_string())?;
-    let variants = [
-        ("timeout", inject_transport(&source, "loss_rate = 1.0")?),
-        ("latency", inject_transport(&source, "delay = \"500ms\"")?),
+    let mut variants = vec![
         (
-            "reorder",
-            inject_transport(&source, "reorder = true seed = 42")?,
+            "timeout".to_string(),
+            inject_transport(&source, "loss_rate = 1.0")?,
+            1_000.0,
         ),
-        ("corrupt", replace_first_send(&source, "corrupt")?),
-        ("duplicate", replace_first_send(&source, "duplicate")?),
+        (
+            "latency".to_string(),
+            inject_transport(&source, "delay = \"500ms\"")?,
+            500.0,
+        ),
+        (
+            "reorder".to_string(),
+            inject_transport(&source, &format!("reorder = true seed = {seed}"))?,
+            1.0,
+        ),
+        (
+            "corrupt".to_string(),
+            replace_first_send(&source, "corrupt")?,
+            1.0,
+        ),
+        (
+            "duplicate".to_string(),
+            replace_first_send(&source, "duplicate")?,
+            1.0,
+        ),
     ];
-    for (name, document) in variants {
-        fs::write(format!("{output}/{name}.tcpf"), document).map_err(|e| e.to_string())?;
+    let mut state = seed.max(1);
+    while variants.len() < budget {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        let loss = 0.01 + (state % 40) as f64 / 100.0;
+        let delay = 10 + (state % 491);
+        let name = format!("campaign-{:04}", variants.len() + 1);
+        let attributes = format!(
+            "loss_rate = {loss:.2} delay = \"{delay}ms\" reorder = {} seed = {}",
+            state.is_multiple_of(2),
+            state
+        );
+        variants.push((
+            name,
+            inject_transport(&source, &attributes)?,
+            loss * 1_000.0 + delay as f64 + if state.is_multiple_of(2) { 1.0 } else { 0.0 },
+        ));
     }
+    variants.truncate(budget);
+    let mut manifest = Vec::new();
+    let mut minimal_failure: Option<(f64, String)> = None;
+    for (name, document, complexity) in variants {
+        let file = format!("{name}.tcpf");
+        fs::write(std::path::Path::new(output).join(&file), &document)
+            .map_err(|e| e.to_string())?;
+        let status = execute
+            .map(|protocol_name| {
+                let blocks = tcpform::parse_file(&document).map_err(|error| error.to_string())?;
+                let protocols = interpret(&blocks).map_err(|error| error.to_string())?;
+                let result = Engine::new(find(&protocols, protocol_name)?.clone())
+                    .map_err(|error| error.to_string())?
+                    .run();
+                Ok::<_, String>(if result.is_ok() { "pass" } else { "fail" })
+            })
+            .transpose()?;
+        if status == Some("fail")
+            && minimal_failure
+                .as_ref()
+                .is_none_or(|(score, _)| complexity < *score)
+        {
+            minimal_failure = Some((complexity, file.clone()));
+        }
+        manifest.push(serde_json::json!({"name":name,"file":file,"seed":seed,"complexity":complexity,"status":status}));
+    }
+    fs::write(std::path::Path::new(output).join("manifest.json"), serde_json::to_vec_pretty(&serde_json::json!({"schema_version":"1.0","budget":budget,"seed":seed,"executed_protocol":execute,"variants":manifest,"minimal_failure":minimal_failure.map(|(complexity,file)|serde_json::json!({"file":file,"complexity":complexity}))})).unwrap()).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn cmd_lint(args: &[String]) -> Result<(), String> {
+    let source = args
+        .first()
+        .filter(|value| !value.starts_with('-'))
+        .ok_or("usage: tcpform lint <source> [--config <file>] [--json] [--deny-warnings]")?;
+    let mut config = if let Some(index) = args.iter().position(|value| value == "--config") {
+        let path = args.get(index + 1).ok_or("--config requires a file")?;
+        serde_json::from_str::<tcpform::productivity::LintConfig>(
+            &fs::read_to_string(path).map_err(|error| format!("cannot read {path}: {error}"))?,
+        )
+        .map_err(|error| format!("invalid lint config: {error}"))?
+    } else {
+        tcpform::productivity::LintConfig::default()
+    };
+    if args.iter().any(|value| value == "--deny-warnings") {
+        config.deny_warnings = true;
+    }
+    let json = args.iter().any(|value| value == "--json");
+    let protocols = load(source)?;
+    let diagnostics = protocols
+        .iter()
+        .flat_map(|protocol| tcpform::productivity::lint_protocol(protocol, &config))
+        .collect::<Vec<_>>();
+    if json {
+        println!("{}", serde_json::to_string_pretty(&diagnostics).unwrap());
+    } else if diagnostics.is_empty() {
+        println!("lint: ok");
+    } else {
+        for diagnostic in &diagnostics {
+            let step = diagnostic
+                .step
+                .as_deref()
+                .map(|value| format!("/{value}"))
+                .unwrap_or_default();
+            println!(
+                "{}{}: {} [{}] {}",
+                diagnostic.protocol, step, diagnostic.severity, diagnostic.rule, diagnostic.message
+            );
+        }
+    }
+    let failed = diagnostics.iter().any(|item| item.severity == "error")
+        || (config.deny_warnings && !diagnostics.is_empty());
+    if failed {
+        Err(format!(
+            "lint failed with {} diagnostic(s)",
+            diagnostics.len()
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn cmd_learn(args: &[String]) -> Result<(), String> {
+    let directory = args
+        .iter()
+        .find(|value| !value.starts_with('-'))
+        .map(String::as_str)
+        .unwrap_or("tcpform-tutorial");
+    let force = args.iter().any(|value| value == "--force");
+    let files = tcpform::productivity::create_tutorial(std::path::Path::new(directory), force)?;
+    for file in &files {
+        println!("created {directory}/{file}");
+    }
+    println!("next: cd {directory} && tcpform test 01-hello.tcpf");
+    if args.iter().any(|value| value == "--run") {
+        for (index, lesson) in files
+            .iter()
+            .filter(|file| file.ends_with(".tcpf"))
+            .enumerate()
+        {
+            if index > 0 && std::io::stdin().is_terminal() {
+                print!("Press Enter for the next lesson...");
+                std::io::stdout()
+                    .flush()
+                    .map_err(|error| error.to_string())?;
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_line(&mut input)
+                    .map_err(|error| error.to_string())?;
+            }
+            println!("\nlesson {}: {lesson}", index + 1);
+            cmd_test(&[std::path::Path::new(directory)
+                .join(lesson)
+                .to_string_lossy()
+                .into_owned()])?;
+        }
+        println!("tutorial complete");
+    }
+    Ok(())
+}
+
+fn cmd_report(args: &[String]) -> Result<(), String> {
+    let mut positional = Vec::new();
+    let mut output = None;
+    let mut baseline = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--output" => {
+                index += 1;
+                output = Some(args.get(index).ok_or("--output requires a file")?.as_str());
+            }
+            "--baseline" => {
+                index += 1;
+                baseline = Some(
+                    args.get(index)
+                        .ok_or("--baseline requires a file")?
+                        .as_str(),
+                );
+            }
+            option if option.starts_with('-') => {
+                return Err(format!("unknown report option `{option}`"))
+            }
+            value => positional.push(value),
+        }
+        index += 1;
+    }
+    let source_path = positional
+        .first()
+        .ok_or("report requires <source> <protocol>")?;
+    let protocol_name = positional
+        .get(1)
+        .ok_or("report requires <source> <protocol>")?;
+    if positional.len() != 2 {
+        return Err("report expects exactly <source> <protocol>".into());
+    }
+    let output = output.ok_or("report requires --output <report.html>")?;
+    let source = fs::read_to_string(source_path).map_err(|error| error.to_string())?;
+    let protocols = load(source_path)?;
+    let protocol = find(&protocols, protocol_name)?;
+    let result = Engine::new(protocol.clone())
+        .map_err(|error| error.to_string())?
+        .run();
+    let (trace, trace_document) = match result {
+        Ok(trace) => {
+            let document = tcpform::output::trace_json("ok", None, &trace);
+            (trace, document)
+        }
+        Err(EngineError::Runtime {
+            kind,
+            message,
+            trace,
+            ..
+        }) => {
+            let document = tcpform::output::trace_json_with_failure(
+                "fail",
+                Some(kind.as_str()),
+                Some(&message),
+                &trace,
+            );
+            (trace, document)
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let trace_json: serde_json::Value = serde_json::from_str(&trace_document).unwrap();
+    let diagram = tcpform::output::sequence_diagram(&trace);
+    let pcap = tcpform::output::trace_pcapng(&trace);
+    let baseline = baseline
+        .map(|path| {
+            serde_json::from_str::<serde_json::Value>(
+                &fs::read_to_string(path)
+                    .map_err(|error| format!("cannot read {path}: {error}"))?,
+            )
+            .map_err(|error| format!("invalid baseline trace: {error}"))
+        })
+        .transpose()?;
+    let html = tcpform::platform::single_html_report_with_baseline(
+        &source,
+        &trace_json,
+        &diagram,
+        Some(&pcap),
+        baseline.as_ref(),
+    );
+    fs::write(output, html).map_err(|error| format!("cannot write {output}: {error}"))?;
+    println!("wrote {output}");
     Ok(())
 }
 fn inject_transport(source: &str, attributes: &str) -> Result<String, String> {
@@ -5184,6 +6016,27 @@ fn parse_shard(value: &str) -> Result<(usize, usize), String> {
 #[cfg(test)]
 mod bundle_tests {
     use super::*;
+    #[test]
+    fn watch_stamp_includes_imported_sources() {
+        let directory = env::temp_dir().join(format!(
+            "tcpform-watch-stamp-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let root = directory.join("root.tcpf");
+        let imported = directory.join("imported.tcpf");
+        fs::write(&root, "import \"imported.tcpf\"\n").unwrap();
+        fs::write(&imported, "protocol \"p\" {}").unwrap();
+        let before = source_stamp(&root).unwrap();
+        fs::write(&imported, "protocol \"p\" { description = \"changed\" }").unwrap();
+        let after = source_stamp(&root).unwrap();
+        assert_ne!(before, after);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn bundle_integrity_detects_tampering() {
         let manifest = serde_json::json!({"protocol":"p"});
